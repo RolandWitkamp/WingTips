@@ -114,7 +114,7 @@
       .crew-card-focused { border-color:var(--accent); box-shadow:0 0 0 3px rgba(0,161,222,0.2); animation:tipHighlight 0.6s ease; }
       @keyframes tipHighlight { 0%{background:#E0F4FD} 100%{background:var(--surface)} }
 
-      .top-nav { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid rgba(0,161,222,0.25); background:#003082; backdrop-filter:blur(12px); position:sticky; top:0; z-index:50; border-radius:0 0 16px 16px; }
+      .top-nav { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid rgba(0,161,222,0.25); background:#003082; backdrop-filter:blur(12px); position:sticky; top:0; z-index:50; }
         .nav-title {
           position: absolute;
           left: 50%;
@@ -131,7 +131,7 @@
         .nav-icon-btn { background:none; border:none; cursor:pointer; font-size:18px; padding:4px; position:relative; color:rgba(255,255,255,0.8); }
         .notif-badge { position:absolute; top:-2px; right:-2px; width:16px; height:16px; background:#ef4444; border-radius:50%; font-size:9px; font-family:'Inter',sans-serif; font-weight:700; color:white; display:flex; align-items:center; justify-content:center; border:2px solid var(--bg); }
 
-        .bottom-nav { display:flex; border-top:1px solid rgba(0,161,222,0.25); background:#003082; backdrop-filter:blur(12px); position:sticky; bottom:0; z-index:50; border-radius:16px 16px 0 0; }
+        .bottom-nav { display:flex; border-top:1px solid rgba(0,161,222,0.25); background:#003082; backdrop-filter:blur(12px); position:sticky; bottom:0; z-index:50; }
         .bnav-item { flex:1; display:flex; flex-direction:column; align-items:center; padding:14px 0; gap:4px; background:none; border:none; cursor:pointer; font-size:12px; font-family:'Inter',sans-serif; font-weight:500; color:rgba(255,255,255,0.6); transition:color 0.15s; letter-spacing:0; }
         .bnav-item.active { color:#00A1DE; }
         .bnav-item:hover:not(:disabled) { color:rgba(255,255,255,0.85); }
