@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.5.0";
+const APP_VERSION = "0.5.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -1771,7 +1771,14 @@ export default function WingTipsApp() {
   const [showResetPassword, setShowResetPassword] = useState(AUTH_HASH_TYPE === "recovery");
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setAuthUser(data.session?.user ?? null));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setAuthUser(session?.user ?? null));
+    // PASSWORD_RECOVERY fires whenever a session was established from a reset-password link,
+    // regardless of whether Supabase used the older hash-based flow (#access_token=...&type=
+    // recovery, what AUTH_HASH_TYPE checks for) or the newer default PKCE flow (?code=...,
+    // which carries no such hash) -- this is the flow-agnostic way to catch both.
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      setAuthUser(session?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") setShowResetPassword(true);
+    });
     return () => listener.subscription.unsubscribe();
   }, []);
   if (authUser === "loading") return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)",fontSize:24}}>✈</div></div>;
