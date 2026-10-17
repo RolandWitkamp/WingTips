@@ -216,6 +216,7 @@
         .map-close-btn { background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); border-radius:20px; padding:6px 14px; font-size:12px; color:white; cursor:pointer; font-family:'DM Mono',monospace; }
         .map-container { flex:1; width:100%; min-height:0; }
         .map-no-coords { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; padding:40px; font-size:13px; color:var(--text2); line-height:1.7; }
+        .map-hint-banner { flex-shrink:0; background:rgba(0,161,222,0.08); border-bottom:1px solid var(--border); padding:10px 20px; text-align:center; font-size:12px; color:var(--text2); line-height:1.5; }
         .crew-hotel-bar { display:flex; align-items:center; gap:10px; padding:12px 20px; background:rgba(0,112,192,0.06); border-bottom:1px solid rgba(0,112,192,0.15); font-size:12px; color:var(--accent); }
 
         .hotel-text { flex:1; }

@@ -13,9 +13,25 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.3.2";
+const APP_VERSION = "0.4.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
+const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
+async function geocodeCity(city: string, country: string): Promise<{ lat: number; lng: number } | null> {
+  const key = `${city},${country}`;
+  if (cityCenterCache[key]) return cityCenterCache[key];
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(key)}&format=json&limit=1`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const data = await res.json();
+    if (data?.[0]) {
+      const center = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      cityCenterCache[key] = center;
+      return center;
+    }
+  } catch {}
+  return null;
+}
 
 function useWeather(code: string, city: string, country: string) {
   const [weather, setWeather] = useState<string | null>(null);
@@ -500,19 +516,23 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     if (!showMap) return;
     const tipsWithCoords = crewTips.filter((t: any) => t.coords);
 
-    const initMap = () => {
+    const initMap = async () => {
       const google = (window as any).google;
       if (!google || !mapContainerRef.current) return;
       mapInstanceRef.current = null;
 
-      let lat = 52.3676, lng = 4.9041;
+      let lat = 52.3676, lng = 4.9041, zoom = 14;
       if (tipsWithCoords.length > 0) {
         lat = tipsWithCoords.reduce((s: number, t: any) => s + parseFloat(t.coords.lat), 0) / tipsWithCoords.length;
         lng = tipsWithCoords.reduce((s: number, t: any) => s + parseFloat(t.coords.lon), 0) / tipsWithCoords.length;
+      } else {
+        const center = await geocodeCity(dest.city, dest.country);
+        if (center) { lat = center.lat; lng = center.lng; zoom = 12; }
+        if (!mapContainerRef.current) return; // screen could have closed while awaiting
       }
 
       const map = new google.maps.Map(mapContainerRef.current, {
-        center: { lat, lng }, zoom: 14,
+        center: { lat, lng }, zoom,
         mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
       });
 
@@ -599,10 +619,10 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <div className="map-header-title">{dest.city} — recommendations</div>
             <button className="map-close-btn" onClick={() => setShowMap(false)}>✕ Close</button>
           </div>
-          {crewTips.filter((t: any) => t.coords).length === 0
-            ? <div className="map-no-coords">No mapped recommendations yet.<br/>Add tips with a place name to see them here.</div>
-            : <div className="map-container" ref={mapContainerRef} />
-          }
+          {crewTips.filter((t: any) => t.coords).length === 0 && (
+            <div className="map-hint-banner">No pinned recommendations yet — showing {dest.city}. Add a tip with a place name to pin it here.</div>
+          )}
+          <div className="map-container" ref={mapContainerRef} />
         </div>
       )}
       <div className="dest-hero">
