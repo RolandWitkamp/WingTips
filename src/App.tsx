@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.3.0";
+const APP_VERSION = "0.3.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 
@@ -406,6 +406,22 @@ function HomeScreen({ onSearch, onDestClick, connections, onToggleConnection }) 
       </div>
     </div>
   );
+}
+
+function useNotifications() {
+  // The badge in the top bar and the Notifications screen used to each keep their own copy of
+  // "read" state, so marking all read there never updated the count here. Read status now lives
+  // in one shared, persisted place.
+  const [readIds, setReadIds] = useState<number[]>(() => {
+    try { return JSON.parse(localStorage.getItem("wt_notifications_read") || "[]") as number[]; }
+    catch { return [] as number[]; }
+  });
+  useEffect(() => {
+    localStorage.setItem("wt_notifications_read", JSON.stringify(readIds));
+  }, [readIds]);
+  const notes = NOTIFICATIONS.map(n => ({ ...n, read: n.read || readIds.includes(n.id) }));
+  function markAllRead() { setReadIds(NOTIFICATIONS.map(n => n.id)); }
+  return { notes, markAllRead };
 }
 
 function useFavorites() {
@@ -1134,14 +1150,13 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick }) {
 }
 
 // ─── NOTIFICATIONS ─────────────────────────────────────────────────────────────
-function NotificationsScreen({ onBack }) {
-  const [notes, setNotes] = useState(NOTIFICATIONS);
+function NotificationsScreen({ onBack, notes, onMarkAllRead }) {
   return (
     <div className="screen">
       <div className="screen-topbar">
         <button className="back-btn-flat" onClick={onBack}>← Back</button>
         <div className="screen-topbar-title">Notifications</div>
-        <button className="mark-read-btn" onClick={() => setNotes(n => n.map(x => ({ ...x, read: true })))}>Mark all read</button>
+        <button className="mark-read-btn" onClick={onMarkAllRead}>Mark all read</button>
       </div>
       <div className="content-pad">
         {notes.map(n => (
@@ -1690,7 +1705,8 @@ function AppContent() {
   const [selectedCrew, setSelectedCrew] = useState<{ name: string; role: string } | null>(null);
   const [showCatMenu, setShowCatMenu] = useState(false);
   const [showDestMenu, setShowDestMenu] = useState(false);
-  const unreadCount = NOTIFICATIONS.filter(n => !n.read).length;
+  const { notes: notifications, markAllRead } = useNotifications();
+  const unreadCount = notifications.filter(n => !n.read).length;
   const { connections, toggle: toggleConnection } = useConnections();
   const { favorites, toggle: toggleFavorite } = useFavorites();
   const { profile, updateProfile } = useProfile();
@@ -1746,7 +1762,7 @@ function AppContent() {
       {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
       {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
-      {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} />}
+      {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} />}
       {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} />}
       {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} />}
