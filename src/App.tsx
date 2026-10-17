@@ -5,12 +5,15 @@ const supabase = createClient(
   "https://sgdqckahseaebayuapgo.supabase.co",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNnZHFja2Foc2VhZWJheXVhcGdvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0NzIxOTUsImV4cCI6MjA5NjA0ODE5NX0.Yyy4K5VS6xkjKk9DTrsoDdL74n2STTACCF52NwNxXgk"
 );
+// Captured once, before Supabase processes/clears the URL hash, so a password-reset link's
+// flow type survives even though it just looks like landing in a normal session otherwise.
+const AUTH_HASH_TYPE = (() => { const m = window.location.hash.match(/type=([^&]+)/); return m ? m[1] : null; })();
 
 const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.2.0";
+const APP_VERSION = "0.3.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 
@@ -1521,6 +1524,8 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [verifyScreen, setVerifyScreen] = useState(false);
+  const [forgotScreen, setForgotScreen] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   async function handleSignUp() {
     setError("");
@@ -1546,6 +1551,41 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
     const { error: err } = await supabase.auth.resend({ type: "signup", email });
     setError(err ? err.message : "Verification email resent.");
   }
+
+  async function handleForgotPassword() {
+    setError("");
+    if (!email) { setError("Enter your e-mail above first."); return; }
+    setLoading(true);
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    setLoading(false);
+    if (err) setError(err.message); else setForgotSent(true);
+  }
+
+  if (forgotScreen) return (
+    <div className="app-shell">
+      <div className="auth-screen">
+        <div className="auth-logo">✈ WingTips</div>
+        {forgotSent ? (
+          <>
+            <div className="auth-verify-icon">📧</div>
+            <div className="auth-title">Check your inbox</div>
+            <div className="auth-subtitle">If an account exists for <strong>{email}</strong>, a reset link is on its way.</div>
+          </>
+        ) : (
+          <>
+            <div className="auth-title">Reset your password</div>
+            <div className="auth-subtitle">Enter your @klm.com address and we'll send you a reset link.</div>
+            <div className="auth-form">
+              <input className="auth-input" type="email" placeholder="your.name@klm.com" value={email} onChange={(e: any) => setEmail(e.target.value)} />
+              {error && <div className="auth-error">{error}</div>}
+              <button className="auth-btn" onClick={handleForgotPassword} disabled={loading}>{loading ? "Please wait…" : "Send reset link"}</button>
+            </div>
+          </>
+        )}
+        <button className="auth-link-btn" onClick={() => { setForgotScreen(false); setForgotSent(false); setError(""); }}>Back to sign in</button>
+      </div>
+    </div>
+  );
 
   if (verifyScreen) return (
     <div className="app-shell">
@@ -1580,6 +1620,42 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
           <button className="auth-btn" onClick={tab === "signin" ? handleSignIn : handleSignUp} disabled={loading}>
             {loading ? "Please wait…" : tab === "signin" ? "Sign in" : "Create account"}
           </button>
+          {tab === "signin" && <button type="button" className="auth-link-btn" onClick={() => { setForgotScreen(true); setError(""); }}>Forgot password?</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSave() {
+    setError("");
+    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    if (password !== confirm) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    const { error: err } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch {}
+    onDone();
+  }
+
+  return (
+    <div className="app-shell">
+      <div className="auth-screen">
+        <div className="auth-logo">✈ WingTips</div>
+        <div className="auth-title">Set a new password</div>
+        <div className="auth-subtitle">Choose a new password for your account.</div>
+        <div className="auth-form">
+          <input className="auth-input" type="password" placeholder="New password" value={password} onChange={(e: any) => setPassword(e.target.value)} />
+          <input className="auth-input" type="password" placeholder="Confirm new password" value={confirm} onChange={(e: any) => setConfirm(e.target.value)} />
+          {error && <div className="auth-error">{error}</div>}
+          <button className="auth-btn" onClick={handleSave} disabled={loading}>{loading ? "Please wait…" : "Save password"}</button>
         </div>
       </div>
     </div>
@@ -1590,12 +1666,14 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
 export default function WingTipsApp() {
   const [authUser, setAuthUser] = useState<any>("loading");
   const [authView, setAuthView] = useState<"landing" | "signin" | "signup">("landing");
+  const [showResetPassword, setShowResetPassword] = useState(AUTH_HASH_TYPE === "recovery");
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setAuthUser(data.session?.user ?? null));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setAuthUser(session?.user ?? null));
     return () => listener.subscription.unsubscribe();
   }, []);
   if (authUser === "loading") return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)",fontSize:24}}>✈</div></div>;
+  if (showResetPassword && authUser) return <ResetPasswordScreen onDone={() => setShowResetPassword(false)} />;
   if (!authUser) {
     if (authView === "landing") return <LandingScreen onGetStarted={() => setAuthView("signup")} onSignIn={() => setAuthView("signin")} />;
     return <AuthScreen initialTab={authView} onBack={() => setAuthView("landing")} />;
