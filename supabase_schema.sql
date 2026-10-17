@@ -18,3 +18,13 @@ create trigger on_auth_user_created before insert on auth.users
 
 -- Dashboard changes needed too (can't be done via SQL):
 -- Authentication -> Providers -> Email -> "Allow new users to sign up" ON, "Confirm email" ON.
+
+-- Lets a signed-in user delete their own account (Profile -> Account -> Delete account) without
+-- exposing the service-role key client-side: this function runs with elevated privileges
+-- (security definer) but only ever deletes auth.uid()'s own row — a regular user only needs
+-- EXECUTE on the function itself, nothing more.
+create or replace function delete_own_account() returns void as $$
+begin
+  delete from auth.users where id = auth.uid();
+end; $$ language plpgsql security definer;
+grant execute on function delete_own_account() to authenticated;

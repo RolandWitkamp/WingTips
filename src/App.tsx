@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.5.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -349,10 +349,10 @@ const CONTINENT_GROUPS = [
 ];
 
 const NOTIFICATIONS = [
-  { id: 1, text: "James R. liked your tip about Dubai gym", time: "2m ago", read: false },
-  { id: 2, text: "New crew tip for Tokyo from Yuki T.", time: "1h ago", read: false },
-  { id: 3, text: "Claire D. posted in New York · Food", time: "3h ago", read: true },
-  { id: 4, text: "Your tip in Dubai received 5 new likes", time: "1d ago", read: true },
+  { id: 1, text: "James R. liked your tip about Dubai shopping", time: "2m ago", read: false, destCode: "DXB", category: "shopping", tipId: 4 },
+  { id: 2, text: "New crew tip for Tokyo from Yuki T.", time: "1h ago", read: false, destCode: "NRT", category: "food", tipId: 1 },
+  { id: 3, text: "Claire D. posted in New York · Food", time: "3h ago", read: true, destCode: "JFK", category: "food", tipId: 2 },
+  { id: 4, text: "Your tip in Dubai received 5 new likes", time: "1d ago", read: true, destCode: "DXB", category: "shopping" },
 ];
 
 // ─── HOME ──────────────────────────────────────────────────────────────────────
@@ -1170,7 +1170,7 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick }) {
 }
 
 // ─── NOTIFICATIONS ─────────────────────────────────────────────────────────────
-function NotificationsScreen({ onBack, notes, onMarkAllRead }) {
+function NotificationsScreen({ onBack, notes, onMarkAllRead, onNotificationClick }) {
   return (
     <div className="screen">
       <div className="screen-topbar">
@@ -1180,12 +1180,77 @@ function NotificationsScreen({ onBack, notes, onMarkAllRead }) {
       </div>
       <div className="content-pad">
         {notes.map(n => (
-          <div key={n.id} className={`notif-item${n.read ? "" : " unread"}`}>
+          <button key={n.id} className={`notif-item${n.read ? "" : " unread"}`} onClick={() => n.destCode && onNotificationClick(n)} disabled={!n.destCode}>
             <div className="notif-dot" style={{ opacity: n.read ? 0 : 1 }} />
             <div className="notif-text">{n.text}</div>
             <div className="notif-time">{n.time}</div>
-          </div>
+          </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function AccountSection() {
+  const [email, setEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+  const [delConfirmText, setDelConfirmText] = useState("");
+  const [delError, setDelError] = useState("");
+  const [delLoading, setDelLoading] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email || ""));
+  }, []);
+
+  async function handleChangePassword() {
+    setPwError(""); setPwSuccess("");
+    if (newPassword.length < 8) { setPwError("Password must be at least 8 characters."); return; }
+    if (newPassword !== confirmPassword) { setPwError("Passwords do not match."); return; }
+    setPwLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setPwLoading(false);
+    if (error) setPwError(error.message);
+    else { setPwSuccess("Password updated."); setNewPassword(""); setConfirmPassword(""); }
+  }
+
+  async function handleDeleteAccount() {
+    setDelError("");
+    if (delConfirmText !== "DELETE") { setDelError('Type "DELETE" to confirm.'); return; }
+    if (!confirm("This permanently deletes your account and cannot be undone. Continue?")) return;
+    setDelLoading(true);
+    const { error } = await supabase.rpc("delete_own_account");
+    setDelLoading(false);
+    if (error) { setDelError(error.message); return; }
+    await supabase.auth.signOut();
+  }
+
+  return (
+    <div className="account-section">
+      {email && <div className="account-email">Logged in as <strong>{email}</strong></div>}
+
+      <div className="account-block">
+        <div className="account-block-title">Change password</div>
+        <div className="auth-form">
+          <input className="auth-input" type="password" placeholder="New password" value={newPassword} onChange={(e: any) => setNewPassword(e.target.value)} />
+          <input className="auth-input" type="password" placeholder="Confirm new password" value={confirmPassword} onChange={(e: any) => setConfirmPassword(e.target.value)} />
+          {pwError && <div className="auth-error">{pwError}</div>}
+          {pwSuccess && <div className="account-success">{pwSuccess}</div>}
+          <button className="auth-btn" onClick={handleChangePassword} disabled={pwLoading}>{pwLoading ? "Please wait…" : "Update password"}</button>
+        </div>
+      </div>
+
+      <button className="account-logout-btn" onClick={() => { if (confirm("Log out?")) supabase.auth.signOut(); }}>Log out</button>
+
+      <div className="account-block account-danger">
+        <div className="account-block-title">Delete account</div>
+        <div className="account-danger-text">This permanently deletes your account and everything tied to it. This cannot be undone.</div>
+        <input className="auth-input" placeholder='Type "DELETE" to confirm' value={delConfirmText} onChange={(e: any) => setDelConfirmText(e.target.value)} />
+        {delError && <div className="auth-error">{delError}</div>}
+        <button className="account-delete-btn" onClick={handleDeleteAccount} disabled={delLoading}>{delLoading ? "Please wait…" : "Delete my account"}</button>
       </div>
     </div>
   );
@@ -1268,6 +1333,7 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
             <button className={`profile-tab${tab === "connections" ? " active" : ""}`} onClick={() => setTab("connections")}>
               Connections {connections.length > 0 && <span className="tab-badge">{connections.length}</span>}
             </button>
+            <button className={`profile-tab${tab === "account" ? " active" : ""}`} onClick={() => setTab("account")}>Account</button>
           </div>
           <div className="content-pad">
             {tab === "tips" && (
@@ -1311,6 +1377,7 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
                 }
               </>
             )}
+            {tab === "account" && <AccountSection />}
           </div>
         </>
       )}
@@ -1774,6 +1841,9 @@ function AppContent() {
             {unreadCount > 0 && <div className="notif-badge">{unreadCount}</div>}
           </button>
           <button className="nav-icon-btn" onClick={() => setScreen("profile")}>👤</button>
+          <button className="nav-icon-btn" aria-label="Log out" onClick={() => { if (confirm("Log out?")) supabase.auth.signOut(); }}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
         </div>
       </div>
 
@@ -1782,7 +1852,7 @@ function AppContent() {
       {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
       {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
-      {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} />}
+      {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
       {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} />}
       {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} />}
