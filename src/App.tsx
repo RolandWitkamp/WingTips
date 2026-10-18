@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.6.0";
+const APP_VERSION = "0.7.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -22,6 +22,24 @@ async function geocodeCity(city: string, country: string): Promise<{ lat: number
   if (cityCenterCache[key]) return cityCenterCache[key];
   try {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(key)}&format=json&limit=1`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const data = await res.json();
+    if (data?.[0]) {
+      const center = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      cityCenterCache[key] = center;
+      return center;
+    }
+  } catch {}
+  return null;
+}
+async function geocodeHotel(crewHotel: string, city: string, country: string): Promise<{ lat: number; lng: number } | null> {
+  if (!crewHotel) return null;
+  // crewHotel sometimes carries a trailing "(crew rate: ...)" note -- strip it before geocoding.
+  const name = crewHotel.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const key = `hotel:${name},${city},${country}`;
+  if (cityCenterCache[key]) return cityCenterCache[key];
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${name}, ${city}, ${country}`)}&format=json&limit=1`;
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     const data = await res.json();
     if (data?.[0]) {
@@ -480,10 +498,15 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       if (!google || !mapContainerRef.current) return;
       mapInstanceRef.current = null;
 
+      const hotelCenter = await geocodeHotel(dest.crewHotel, dest.city, dest.country);
+      if (!mapContainerRef.current) return; // screen could have closed while awaiting
+
       let lat = 52.3676, lng = 4.9041, zoom = 14;
       if (tipsWithCoords.length > 0) {
         lat = tipsWithCoords.reduce((s: number, t: any) => s + parseFloat(t.coords.lat), 0) / tipsWithCoords.length;
         lng = tipsWithCoords.reduce((s: number, t: any) => s + parseFloat(t.coords.lon), 0) / tipsWithCoords.length;
+      } else if (hotelCenter) {
+        lat = hotelCenter.lat; lng = hotelCenter.lng; zoom = 14;
       } else {
         const center = await geocodeCity(dest.city, dest.country);
         if (center) { lat = center.lat; lng = center.lng; zoom = 12; }
@@ -507,6 +530,19 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         });
         marker.addListener("click", () => infoWindow.open(map, marker));
       });
+
+      if (hotelCenter) {
+        const hotelMarker = new google.maps.Marker({
+          position: hotelCenter,
+          map,
+          zIndex: 999,
+          icon: { path: "M7 13h10v5H7v-5zm12 0h1a1 1 0 0 1 1 1v6h-2v-7zM3 13h1v7H2v-6a1 1 0 0 1 1-1zM5 4h14a2 2 0 0 1 2 2v6H3V6a2 2 0 0 1 2-2zm3 3a1 1 0 1 0 0 2 1 1 0 0 0 0-2z", fillColor: "#F59E0B", fillOpacity: 1, strokeColor: "#92400E", strokeWeight: 1, scale: 1.4, anchor: new google.maps.Point(12, 20) }
+        });
+        const hotelInfo = new google.maps.InfoWindow({
+          content: `<strong>${dest.crewHotel.replace(/\s*\([^)]*\)\s*$/, "").trim()}</strong><br/><span style="font-size:11px;color:#4A7C9E">Crew hotel</span>`
+        });
+        hotelMarker.addListener("click", () => hotelInfo.open(map, hotelMarker));
+      }
 
       mapInstanceRef.current = map;
     };
@@ -579,7 +615,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <button className="map-close-btn" onClick={() => setShowMap(false)}>✕ Close</button>
           </div>
           {crewTips.filter((t: any) => t.coords).length === 0 && (
-            <div className="map-hint-banner">No pinned recommendations yet — showing {dest.city}. Add a tip with a place name to pin it here.</div>
+            <div className="map-hint-banner">No pinned recommendations yet{dest.crewHotel ? " — showing the crew hotel" : ` — showing ${dest.city}`}. Add a tip with a place name to pin it here.</div>
           )}
           <div className="map-container" ref={mapContainerRef} />
         </div>
