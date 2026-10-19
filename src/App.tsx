@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.14.0";
+const APP_VERSION = "0.15.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -390,6 +390,21 @@ const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boole
 // ─── HOME ──────────────────────────────────────────────────────────────────────
 function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
   const [query, setQuery] = useState("");
+  const [showSugg, setShowSugg] = useState(false);
+  const q = query.trim().toLowerCase();
+  const suggestions = q.length < 2 ? [] : (Object.values(DESTINATIONS) as any[])
+    .filter(d => d.city.toLowerCase().includes(q) || d.code.toLowerCase() === q || d.country.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const aStarts = a.city.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.city.toLowerCase().startsWith(q) ? 0 : 1;
+      return aStarts - bStarts || a.city.localeCompare(b.city);
+    })
+    .slice(0, 6);
+  function pickSuggestion(code: string) {
+    setQuery("");
+    setShowSugg(false);
+    onDestClick(code);
+  }
   const latestTip = (() => {
     let best: { tip: any; destCode: string; destCity: string; destFlag: string } | null = null;
     for (const dest of Object.values(DESTINATIONS) as any[]) {
@@ -412,10 +427,22 @@ function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
           <div className="search-box">
             <span className="search-icon">🔍</span>
             <input className="search-field" placeholder="City or IATA code — NRT, DXB, JFK…"
-              value={query} onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && onSearch(query)} />
-            <button className="search-go" onClick={() => onSearch(query)}>→</button>
+              value={query}
+              onChange={e => { setQuery(e.target.value); setShowSugg(true); }}
+              onFocus={() => suggestions.length > 0 && setShowSugg(true)}
+              onKeyDown={e => e.key === "Enter" && (setShowSugg(false), onSearch(query))} />
+            <button className="search-go" onClick={() => { setShowSugg(false); onSearch(query); }}>→</button>
           </div>
+          {showSugg && suggestions.length > 0 && (
+            <div className="sugg-dropdown">
+              {suggestions.map((d: any) => (
+                <button key={d.code} className="sugg-item" onMouseDown={() => pickSuggestion(d.code)}>
+                  <span className="sugg-primary">{d.flag} {d.city}</span>
+                  <span className="sugg-addr">{d.country} · {d.code}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {recentDests.length > 0 && (
@@ -1578,14 +1605,50 @@ function CrewProfileScreen({ crew, onBack, connections, onToggleConnection, adde
 
 function DestinationsMenu({ onClose, onSelect, selectedDest }) {
   const [openContinent, setOpenContinent] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const allDests = Object.values(DESTINATIONS) as any[];
   const groups = groupDestsByContinentCountry(allDests);
+  const q = query.trim().toLowerCase();
+  const searchResults = q.length === 0 ? null : allDests
+    .filter(d => d.city.toLowerCase().includes(q) || d.country.toLowerCase().includes(q) || d.code.toLowerCase() === q)
+    .sort((a, b) => {
+      const aStarts = a.city.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.city.toLowerCase().startsWith(q) ? 0 : 1;
+      return aStarts - bStarts || a.city.localeCompare(b.city);
+    });
   return (
     <div className="cat-menu-backdrop" onClick={onClose}>
       <div className="cat-menu-sheet dest-sheet" onClick={e => e.stopPropagation()}>
         <div className="cat-menu-handle" />
         <div className="cat-menu-title">All Destinations</div>
         <div className="cat-menu-dest">{allDests.length} destinations · KLM &amp; KLM Cityhopper network</div>
+        <div className="dest-search-row">
+          <input className="dest-search-inp" placeholder="Search city, country or code…"
+            value={query} onChange={e => setQuery(e.target.value)} autoComplete="off" />
+          {query && <button className="dest-search-clear" onClick={() => setQuery("")}>✕</button>}
+        </div>
+        {searchResults && (
+          <div className="dest-continent-list">
+            {searchResults.length === 0
+              ? <div className="no-tips" style={{ padding: "0 16px" }}>No destinations match "{query}".</div>
+              : <div className="dest-list-inner">
+                  {searchResults.map((d: any) => (
+                    <button key={d.code}
+                      className={`dest-list-item${selectedDest === d.code ? " active" : ""}`}
+                      onClick={() => { onSelect(d.code); onClose(); }}>
+                      <div className="dli-text">
+                        <span className="dli-city">{d.flag} {d.city}</span>
+                        <span className="dli-sub">{d.country}</span>
+                      </div>
+                      <span className="dli-code">{d.code}</span>
+                      {selectedDest === d.code && <span className="dli-tick">✓</span>}
+                    </button>
+                  ))}
+                </div>
+            }
+          </div>
+        )}
+        {!searchResults && (
         <div className="dest-continent-list">
           {groups.map(group => {
             const isOpen = openContinent === group.continent;
@@ -1625,6 +1688,7 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
             );
           })}
         </div>
+        )}
       </div>
     </div>
   );
