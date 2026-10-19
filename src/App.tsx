@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.12.0";
+const APP_VERSION = "0.12.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -1220,12 +1220,13 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
 }
 
 // ─── FAVORITES ─────────────────────────────────────────────────────────────────
-function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick }) {
+function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, addedTips }) {
   const savedTips = favorites.map((key: string) => {
     const [code, idStr] = key.split("-");
     const dest = (DESTINATIONS as any)[code];
     if (!dest) return null;
-    const tip = dest.crewTips.find(t => String(t.id) === idStr);
+    const allTips = [...(dest.crewTips || []), ...((addedTips[code]) || [])];
+    const tip = allTips.find(t => String(t.id) === idStr);
     if (!tip) return null;
     return { key, code, dest, tip };
   }).filter(Boolean);
@@ -2005,7 +2006,7 @@ function AppContent() {
       {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
       {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
       {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
-      {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} />}
+      {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} />}
       {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} />}
 
