@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.8.0";
+const APP_VERSION = "0.9.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -311,6 +311,10 @@ const COUNTRY_CONTINENT: Record<string, string> = {
   "Canada":"North America","Mexico":"North America","United States":"North America",
   "Aruba":"Caribbean & Central America","Bonaire":"Caribbean & Central America","Costa Rica":"Caribbean & Central America","Curaçao":"Caribbean & Central America","Panama":"Caribbean & Central America","Sint Maarten / Saint-Martin":"Caribbean & Central America","Trinidad & Tobago":"Caribbean & Central America",
   "Argentina":"South America","Brazil":"South America","Chile":"South America","Colombia":"South America","Ecuador":"South America","Guyana":"South America","Peru":"South America","Suriname":"South America",
+};
+const CONTINENT_COLORS: Record<string, string> = {
+  "Europe":"#4A90D9","Africa":"#F1C40F","Middle East":"#9B59B6","Asia":"#E67E22",
+  "Oceania":"#16A085","North America":"#27AE60","Caribbean & Central America":"#00BCD4","South America":"#2ECC71",
 };
 
 const CATEGORIES = [
@@ -842,11 +846,24 @@ function osmCategoryGuess(cls: string, type: string): string {
 
 function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defaultCategory }) {
   const allDests = Object.values(DESTINATIONS) as any[];
-  const destsByContinent = CONTINENT_ORDER.map(continent => ({
-    continent,
-    dests: allDests.filter(d => (COUNTRY_CONTINENT[d.country] || "Other") === continent).sort((a, b) => a.city.localeCompare(b.city)),
-  })).filter(g => g.dests.length > 0);
+  const destsByContinentCountry = CONTINENT_ORDER.map(continent => {
+    const dests = allDests.filter(d => (COUNTRY_CONTINENT[d.country] || "Other") === continent);
+    if (dests.length === 0) return null;
+    const countryNames = Array.from(new Set(dests.map(d => d.country))).sort();
+    return {
+      continent,
+      color: CONTINENT_COLORS[continent] || "#94A3B8",
+      count: dests.length,
+      countries: countryNames.map(country => ({
+        country,
+        flag: dests.find(d => d.country === country)?.flag,
+        dests: dests.filter(d => d.country === country).sort((a, b) => a.city.localeCompare(b.city)),
+      })),
+    };
+  }).filter(Boolean) as any[];
   const [destCode, setDestCode] = useState(selectedDest || "");
+  const [showDestPicker, setShowDestPicker] = useState(false);
+  const [openContinent, setOpenContinent] = useState<string | null>(null);
   const [place, setPlace] = useState("");
   const [category, setCategory] = useState(defaultCategory || "food");
   const [note, setNote] = useState("");
@@ -980,15 +997,60 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
 
         <div className="form-group">
           <label className="form-lbl">Destination</label>
-          <select className="form-sel" value={destCode} onChange={e => { setDestCode(e.target.value); setPlace(""); setPlaceCoords(null); setSuggestions([]); }}>
-            <option value="">— Select city —</option>
-            {destsByContinent.map(g => (
-              <optgroup key={g.continent} label={g.continent}>
-                {g.dests.map(d => <option key={d.code} value={d.code}>{d.flag} {d.city}</option>)}
-              </optgroup>
-            ))}
-          </select>
+          <button type="button" className="form-sel dest-picker-trigger" onClick={() => setShowDestPicker(true)}>
+            <span>{dest ? `${dest.flag} ${dest.city}` : "— Select city —"}</span>
+            <span className="dest-picker-chevron">▼</span>
+          </button>
         </div>
+
+        {showDestPicker && (
+          <div className="cat-menu-backdrop" onClick={() => setShowDestPicker(false)}>
+            <div className="cat-menu-sheet dest-sheet" onClick={e => e.stopPropagation()}>
+              <div className="cat-menu-handle" />
+              <div className="cat-menu-title">Select destination</div>
+              <div className="cat-menu-dest">{allDests.length} destinations · grouped by continent &amp; country</div>
+              <div className="dest-continent-list">
+                {destsByContinentCountry.map(group => {
+                  const isOpen = openContinent === group.continent;
+                  return (
+                    <div key={group.continent} className="continent-block">
+                      <button type="button" className={`continent-header${isOpen ? " open" : ""}`}
+                        onClick={() => setOpenContinent(isOpen ? null : group.continent)}>
+                        <span className="continent-dot" style={{background: group.color}} />
+                        <span className="continent-label">{group.continent}</span>
+                        <span className="continent-count">{group.count}</span>
+                        <span className="continent-chevron">{isOpen ? "▲" : "▼"}</span>
+                      </button>
+                      {isOpen && (
+                        <div className="dest-list-inner">
+                          {group.countries.map((c: any) => (
+                            <div key={c.country} className="country-group">
+                              <div className="country-header">
+                                <span className="country-flag-chip">{c.flag}</span>
+                                <span className="country-name">{c.country}</span>
+                              </div>
+                              {c.dests.map((d: any) => (
+                                <button key={d.code} type="button"
+                                  className={`dest-list-item no-flag${destCode === d.code ? " active" : ""}`}
+                                  onClick={() => { setDestCode(d.code); setPlace(""); setPlaceCoords(null); setSuggestions([]); setShowDestPicker(false); }}>
+                                  <div className="dli-text">
+                                    <span className="dli-city">{d.city}</span>
+                                  </div>
+                                  <span className="dli-code">{d.code}</span>
+                                  {destCode === d.code && <span className="dli-tick">✓</span>}
+                                </button>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="form-group" style={{ position: "relative" }}>
           <label className="form-lbl">Place name</label>
