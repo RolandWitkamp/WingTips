@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.13.0";
+const APP_VERSION = "0.14.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -354,6 +354,23 @@ const CONTINENT_COLORS: Record<string, string> = {
   "Europe":"#4A90D9","Africa":"#F1C40F","Middle East":"#9B59B6","Asia":"#E67E22",
   "Oceania":"#16A085","North America":"#27AE60","Caribbean & Central America":"#00BCD4","South America":"#2ECC71",
 };
+function groupDestsByContinentCountry(dests: any[]) {
+  return CONTINENT_ORDER.map(continent => {
+    const continentDests = dests.filter(d => (COUNTRY_CONTINENT[d.country] || "Other") === continent);
+    if (continentDests.length === 0) return null;
+    const countryNames = Array.from(new Set(continentDests.map(d => d.country))).sort();
+    return {
+      continent,
+      color: CONTINENT_COLORS[continent] || "#94A3B8",
+      count: continentDests.length,
+      countries: countryNames.map(country => ({
+        country,
+        flag: continentDests.find(d => d.country === country)?.flag,
+        dests: continentDests.filter(d => d.country === country).sort((a, b) => a.city.localeCompare(b.city)),
+      })),
+    };
+  }).filter(Boolean) as any[];
+}
 
 const CATEGORIES = [
   { id: "food",          label: "Food & Drink",    icon: "🍽️" },
@@ -368,20 +385,10 @@ const CATEGORIES = [
   { id: "other",         label: "Other",           icon: "📌" },
 ];
 
-const CONTINENT_GROUPS = [
-  { id: "europe",   label: "Europe",                    color: "#4A90D9", codes: ["AMS","VIE","BRU","GVA","ZRH","CPH","ARN","OSL","HEL","WAW","PRG","BUD","BCN","MAD","LIS","FCO","MXP","LHR","MAN","BEG","LJU","ZAG","SKP","ABZ","AES","BER","BHD","BHX","BLL","BLQ","BRS","CWL","DUS","EDI","EXT","FRA","GDN","GLA","HAJ","HAM","HUY","INV","LBA","LUX","MME","NCL","NWI","ORK","POZ","SOU","SVG"] },
-  { id: "namerica", label: "North America",              color: "#27AE60", codes: ["JFK","ATL","BOS","DTW","IAD","IAH","LAS","LAX","MIA","MSP","ORD","PDX","SAN","SFO","SLC","AUS","YEG","YUL","YVR","YYC","YYZ","MEX"] },
-  { id: "samerica", label: "South & Central America",    color: "#2ECC71", codes: ["GRU","GIG","EZE","SCL","LIM","BOG","CTG","PTY","SJO","GYE","UIO","GEO","PBM"] },
-  { id: "caribbean",label: "Caribbean",                  color: "#00BCD4", codes: ["CUR","AUA","BON","SXM","POS"] },
-  { id: "asia",     label: "Asia & Pacific",             color: "#E67E22", codes: ["NRT","KIX","ICN","TPE","DXB","SIN","BKK","KUL","CGK","DPS","MNL","HKG","PVG","PEK","DEL","BOM","HYD","BLR","SYD"] },
-  { id: "africa",   label: "Africa",                     color: "#F1C40F", codes: ["NBO","JNB","CPT","KGL","JRO","DAR","EBB","LOS","ACC"] },
-  { id: "mideast",  label: "Middle East",                color: "#9B59B6", codes: ["RUH","DMM"] },
-];
-
 const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boolean; destCode: string; category?: string; tipId?: number }> = [];
 
 // ─── HOME ──────────────────────────────────────────────────────────────────────
-function HomeScreen({ onSearch, onDestClick, addedTips }) {
+function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
   const [query, setQuery] = useState("");
   const latestTip = (() => {
     let best: { tip: any; destCode: string; destCity: string; destFlag: string } | null = null;
@@ -411,20 +418,23 @@ function HomeScreen({ onSearch, onDestClick, addedTips }) {
           </div>
         </div>
       </div>
-      <div className="section-block">
-        <div className="section-label">QUICK ACCESS</div>
-        <div className="dest-row">
-          {["DXB","NRT","JFK"].map(code => {
-            const d = DESTINATIONS[code];
-            return (
-              <button key={code} className="dest-pill" onClick={() => onDestClick(code)}>
-                <img className="pill-flag" src={`https://flagcdn.com/w40/${flagToCode(d.flag)}.png`} alt={d.country} />
-                <div><div className="pill-city">{d.city}</div><div className="pill-code">{code}</div></div>
-              </button>
-            );
-          })}
+      {recentDests.length > 0 && (
+        <div className="section-block">
+          <div className="section-label">QUICK ACCESS</div>
+          <div className="dest-row">
+            {recentDests.slice(0, 3).map((code: string) => {
+              const d = (DESTINATIONS as any)[code];
+              if (!d) return null;
+              return (
+                <button key={code} className="dest-pill" onClick={() => onDestClick(code)}>
+                  <img className="pill-flag" src={`https://flagcdn.com/${flagToCode(d.flag)}.svg`} alt={d.country} loading="lazy" />
+                  <div><div className="pill-city">{d.city}</div><div className="pill-code">{code}</div></div>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
       {latestTip && (
         <div className="section-block">
           <div className="section-label">LATEST FROM THE CREW</div>
@@ -460,15 +470,38 @@ function useFavorites() {
     try { return JSON.parse(localStorage.getItem("wt_favorites") || "[]") as string[]; }
     catch { return [] as string[]; }
   });
+  const [seen, setSeen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("wt_favorites_seen") || "[]") as string[]; }
+    catch { return [] as string[]; }
+  });
   useEffect(() => {
     localStorage.setItem("wt_favorites", JSON.stringify(favorites));
   }, [favorites]);
+  useEffect(() => {
+    localStorage.setItem("wt_favorites_seen", JSON.stringify(seen));
+  }, [seen]);
   function toggle(key: string) {
     setFavorites((prev: string[]) =>
       prev.includes(key) ? prev.filter((k: string) => k !== key) : [...prev, key]
     );
   }
-  return { favorites, toggle };
+  function markAllSeen() { setSeen(favorites); }
+  const unseenCount = favorites.filter(k => !seen.includes(k)).length;
+  return { favorites, toggle, unseenCount, markAllSeen };
+}
+
+function useRecentDestinations() {
+  const [recent, setRecent] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("wt_recent_destinations") || "[]") as string[]; }
+    catch { return [] as string[]; }
+  });
+  useEffect(() => {
+    localStorage.setItem("wt_recent_destinations", JSON.stringify(recent));
+  }, [recent]);
+  function visit(code: string) {
+    setRecent((prev: string[]) => [code, ...prev.filter((c: string) => c !== code)].slice(0, 8));
+  }
+  return { recent, visit };
 }
 
 // ─── TIMEZONE OFFSETS (UTC, summer/CEST reference) ────────────────────────────
@@ -670,7 +703,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       )}
       <div className="dest-hero">
         <button className="back-btn" onClick={onBack}>← Back</button>
-        <img className="dest-flag-big" src={`https://flagcdn.com/w80/${flagToCode(dest.flag)}.png`} alt={dest.country} />
+        <img className="dest-flag-big" src={`https://flagcdn.com/${flagToCode(dest.flag)}.svg`} alt={dest.country} />
         <div className="dest-hero-name">{dest.city}</div>
         <div className="dest-hero-country">{dest.country}</div>
         {(() => {
@@ -874,21 +907,7 @@ function osmCategoryGuess(cls: string, type: string): string {
 
 function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defaultCategory }) {
   const allDests = Object.values(DESTINATIONS) as any[];
-  const destsByContinentCountry = CONTINENT_ORDER.map(continent => {
-    const dests = allDests.filter(d => (COUNTRY_CONTINENT[d.country] || "Other") === continent);
-    if (dests.length === 0) return null;
-    const countryNames = Array.from(new Set(dests.map(d => d.country))).sort();
-    return {
-      continent,
-      color: CONTINENT_COLORS[continent] || "#94A3B8",
-      count: dests.length,
-      countries: countryNames.map(country => ({
-        country,
-        flag: dests.find(d => d.country === country)?.flag,
-        dests: dests.filter(d => d.country === country).sort((a, b) => a.city.localeCompare(b.city)),
-      })),
-    };
-  }).filter(Boolean) as any[];
+  const destsByContinentCountry = groupDestsByContinentCountry(allDests);
   const [destCode, setDestCode] = useState(selectedDest || "");
   const [showDestPicker, setShowDestPicker] = useState(false);
   const [openContinent, setOpenContinent] = useState<string | null>(null);
@@ -1558,40 +1577,47 @@ function CrewProfileScreen({ crew, onBack, connections, onToggleConnection, adde
 }
 
 function DestinationsMenu({ onClose, onSelect, selectedDest }) {
-  const [openContinent, setOpenContinent] = useState(null);
+  const [openContinent, setOpenContinent] = useState<string | null>(null);
+  const allDests = Object.values(DESTINATIONS) as any[];
+  const groups = groupDestsByContinentCountry(allDests);
   return (
     <div className="cat-menu-backdrop" onClick={onClose}>
       <div className="cat-menu-sheet dest-sheet" onClick={e => e.stopPropagation()}>
         <div className="cat-menu-handle" />
         <div className="cat-menu-title">All Destinations</div>
-        <div className="cat-menu-dest">105 destinations · KLM &amp; KLM Cityhopper network</div>
+        <div className="cat-menu-dest">{allDests.length} destinations · KLM &amp; KLM Cityhopper network</div>
         <div className="dest-continent-list">
-          {CONTINENT_GROUPS.map(group => {
-            const isOpen = openContinent === group.id;
-            const dests = group.codes.map(c => DESTINATIONS[c]).filter(Boolean);
+          {groups.map(group => {
+            const isOpen = openContinent === group.continent;
             return (
-              <div key={group.id} className="continent-block">
+              <div key={group.continent} className="continent-block">
                 <button className={`continent-header${isOpen ? " open" : ""}`}
-                  onClick={() => setOpenContinent(isOpen ? null : group.id)}>
+                  onClick={() => setOpenContinent(isOpen ? null : group.continent)}>
                   <span className="continent-dot" style={{background: group.color}} />
-                  <span className="continent-label">{group.label}</span>
-                  <span className="continent-count">{dests.length}</span>
+                  <span className="continent-label">{group.continent}</span>
+                  <span className="continent-count">{group.count}</span>
                   <span className="continent-chevron">{isOpen ? "▲" : "▼"}</span>
                 </button>
                 {isOpen && (
                   <div className="dest-list-inner">
-                    {dests.map(d => (
-                      <button key={d.code}
-                        className={`dest-list-item${selectedDest === d.code ? " active" : ""}`}
-                        onClick={() => { onSelect(d.code); onClose(); }}>
-                        <span className="dli-flag">{d.flag}</span>
-                        <div className="dli-text">
-                          <span className="dli-city">{d.city}</span>
-                          <span className="dli-country">{d.country}</span>
+                    {group.countries.map((c: any) => (
+                      <div key={c.country} className="country-group">
+                        <div className="country-header">
+                          <span className="country-flag-chip">{c.flag}</span>
+                          <span className="country-name">{c.country}</span>
                         </div>
-                        <span className="dli-code">{d.code}</span>
-                        {selectedDest === d.code && <span className="dli-tick">✓</span>}
-                      </button>
+                        {c.dests.map((d: any) => (
+                          <button key={d.code}
+                            className={`dest-list-item no-flag${selectedDest === d.code ? " active" : ""}`}
+                            onClick={() => { onSelect(d.code); onClose(); }}>
+                            <div className="dli-text">
+                              <span className="dli-city">{d.city}</span>
+                            </div>
+                            <span className="dli-code">{d.code}</span>
+                            {selectedDest === d.code && <span className="dli-tick">✓</span>}
+                          </button>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1967,8 +1993,17 @@ function AppContent() {
   const { notes: notifications, markAllRead } = useNotifications();
   const unreadCount = notifications.filter(n => !n.read).length;
   const { connections, toggle: toggleConnection } = useConnections();
-  const { favorites, toggle: toggleFavorite } = useFavorites();
+  const { favorites, toggle: toggleFavorite, unseenCount: unseenFavorites, markAllSeen: markFavoritesSeen } = useFavorites();
+  const { recent: recentDests, visit: visitDest } = useRecentDestinations();
   const { profile, updateProfile } = useProfile();
+
+  useEffect(() => {
+    if (screen === "dest" && selectedDest) visitDest(selectedDest);
+  }, [screen, selectedDest]);
+
+  useEffect(() => {
+    if (screen === "favorites") markFavoritesSeen();
+  }, [screen]);
   const [addedTips, setAddedTips] = useState<Record<string, any[]>>(() => {
     try { return JSON.parse(localStorage.getItem("wt_added_tips") || "{}"); }
     catch { return {}; }
@@ -2020,7 +2055,7 @@ function AppContent() {
       </div>
 
       {/* SCREENS */}
-      {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} />}
+      {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
       {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
       {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
@@ -2045,7 +2080,7 @@ function AppContent() {
           Categories
         </button>
         <button className={`bnav-item${screen === "favorites" ? " active" : ""}`} onClick={() => setScreen("favorites")}>
-          Saved {favorites.length > 0 && <span className="bnav-badge">{favorites.length}</span>}
+          Saved {unseenFavorites > 0 && <span className="bnav-badge">{unseenFavorites}</span>}
         </button>
       </div>
 
