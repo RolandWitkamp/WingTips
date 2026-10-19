@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.12.1";
+const APP_VERSION = "0.13.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -61,6 +61,32 @@ function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 }
 function fmtDistance(km: number): string {
   return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
+}
+function tipMapsUrl(tip: any, dest: any): string {
+  if (tip.coords) return `https://www.google.com/maps/search/?api=1&query=${tip.coords.lat},${tip.coords.lon}`;
+  const q = tip.text.startsWith("📍")
+    ? tip.text.slice(2).split("—")[0].trim()
+    : tip.text.replace(/[^\w\s,''-]/g, " ").slice(0, 60).trim();
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q + " " + dest.city)}`;
+}
+function buildTipShareText(tip: any, dest: any): string {
+  const cat = CATEGORIES.find(c => c.id === tip.category);
+  const lines = [`${dest.flag} ${dest.city} · ${cat?.label || tip.category}`, tip.text];
+  if (tip.price) lines.push(`💰 ${tip.price}`);
+  if (tip.hours) lines.push(`🕐 ${tip.hours}`);
+  if (tip.discount) lines.push(`✂️ ${tip.discount === true ? "Crew discount" : `${tip.discount} crew discount`}`);
+  lines.push(`📍 ${tipMapsUrl(tip, dest)}`);
+  lines.push("— shared via WingTips");
+  return lines.join("\n");
+}
+async function shareTip(tip: any, dest: any, onCopied?: () => void) {
+  const text = buildTipShareText(tip, dest);
+  const nav = navigator as any;
+  if (nav.share) {
+    try { await nav.share({ title: `${dest.city} — WingTips`, text }); } catch {}
+    return;
+  }
+  try { await navigator.clipboard.writeText(text); onCopied?.(); } catch {}
 }
 
 function useWeather(code: string, city: string, country: string) {
@@ -502,6 +528,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const [hotelCoords, setHotelCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [copiedTipId, setCopiedTipId] = useState<string | number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -750,17 +777,10 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 )}
                 <div className="tip-actions">
                   <button className="like-btn" onClick={() => handleLike(tip.id)}>❤ {tip.likes}</button>
-                  {(() => {
-                    const url = tip.coords
-                      ? `https://www.google.com/maps/search/?api=1&query=${tip.coords.lat},${tip.coords.lon}`
-                      : (() => {
-                          const q = tip.text.startsWith("📍")
-                            ? tip.text.slice(2).split("—")[0].trim()
-                            : tip.text.replace(/[^\w\s,''-]/g, " ").slice(0, 60).trim();
-                          return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q + " " + dest.city)}`;
-                        })();
-                    return <a href={url} target="_blank" rel="noreferrer" className="maps-link">📍 Maps</a>;
-                  })()}
+                  <a href={tipMapsUrl(tip, dest)} target="_blank" rel="noreferrer" className="maps-link">📍 Maps</a>
+                  <button className="share-btn" onClick={() => shareTip(tip, dest, () => { setCopiedTipId(tip.id); setTimeout(() => setCopiedTipId((id: any) => id === tip.id ? null : id), 1800); })}>
+                    {copiedTipId === tip.id ? "✓ Copied" : "↗ Share"}
+                  </button>
                   <button
                     className={`comment-toggle-btn${isExpanded ? " active" : ""}`}
                     onClick={() => setExpandedTip(isExpanded ? null : tip.id)}>

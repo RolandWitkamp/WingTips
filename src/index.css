@@ -52,6 +52,8 @@
       .fav-btn.saved { color:#f59e0b; }
       .maps-link { background:rgba(0,161,222,0.08); border:1px solid rgba(0,161,222,0.25); border-radius:6px; padding:4px 9px; font-size:11px; color:var(--accent); text-decoration:none; white-space:nowrap; font-family:'Inter',sans-serif; font-weight:500; }
       .maps-link:hover { background:rgba(0,161,222,0.18); }
+      .share-btn { background:none; border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11px; color:var(--text2); cursor:pointer; white-space:nowrap; font-family:'Inter',sans-serif; font-weight:500; }
+      .share-btn:hover { background:rgba(0,161,222,0.08); color:var(--accent); border-color:rgba(0,161,222,0.3); }
       .fav-dest-label { background:rgba(0,161,222,0.08); border:1px solid rgba(0,161,222,0.2); border-radius:6px; padding:4px 10px; font-size:11px; color:var(--accent); cursor:pointer; font-family:'Inter',sans-serif; font-weight:600; }
       .fav-dest-label:hover { background:rgba(0,161,222,0.15); }
       .bnav-badge { background:var(--accent); color:white; border-radius:10px; padding:1px 5px; font-size:9px; font-weight:700; margin-left:3px; }
