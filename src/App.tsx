@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.11.0";
+const APP_VERSION = "0.12.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -146,7 +146,7 @@ const DESTINATIONS = {
   JNB: { code:"JNB", city:"Johannesburg", country:"South Africa", flag:"🇿🇦", crewHotel:"Balalaika", layoverHours:18, weather:"20°C / Sunny", localTime:"11:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   GRU: { code:"GRU", city:"Sao Paulo", country:"Brazil", flag:"🇧🇷", crewHotel:"Grand Mercure Ibirapuera", layoverHours:20, weather:"24°C / Humid", localTime:"06:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   EZE: { code:"EZE", city:"Buenos Aires", country:"Argentina", flag:"🇦🇷", crewHotel:"Hotel Emperador", layoverHours:22, weather:"16°C / Partly Cloudy", localTime:"06:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
-  SYD: { code:"SYD", city:"Sydney", country:"Australia", flag:"🇦🇺", crewHotel:"Rydges Sydney Airport (crew rate: AUD 165/night)", layoverHours:24, weather:"22°C / Sunny", localTime:"20:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  SYD: { code:"SYD", city:"Sydney", country:"Australia", flag:"🇦🇺", crewHotel:"Rydges Sydney Airport", layoverHours:24, weather:"22°C / Sunny", localTime:"20:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   ORD: { code:"ORD", city:"Chicago", country:"United States", flag:"🇺🇸", crewHotel:"Sheraton Grand Chicago Riverwalk", layoverHours:18, weather:"8°C / Windy", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   BOS: { code:"BOS", city:"Boston", country:"United States", flag:"🇺🇸", crewHotel:"Hilton Boston Back Bay", layoverHours:18, weather:"10°C / Cloudy", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   IAD: { code:"IAD", city:"Washington DC", country:"United States", flag:"🇺🇸", crewHotel:"Omni Shoreham", layoverHours:20, weather:"14°C / Clear", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
@@ -156,35 +156,35 @@ const DESTINATIONS = {
   PVG: { code:"PVG", city:"Shanghai", country:"China", flag:"🇨🇳", crewHotel:"Crowne Plaza", layoverHours:20, weather:"18°C / Overcast", localTime:"17:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   DEL: { code:"DEL", city:"Delhi", country:"India", flag:"🇮🇳", crewHotel:"ITC Sheraton New Delhi", layoverHours:20, weather:"28°C / Hazy", localTime:"14:30", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   BOM: { code:"BOM", city:"Mumbai", country:"India", flag:"🇮🇳", crewHotel:"ITC Maratha", layoverHours:20, weather:"30°C / Humid", localTime:"14:30", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
-  RUH: { code:"RUH", city:"Riyadh", country:"Saudi Arabia", flag:"🇸🇦", crewHotel:"Marriott Executive Apartments Riyadh (crew rate: SAR 450/night)", layoverHours:16, weather:"35°C / Sunny", localTime:"12:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  RUH: { code:"RUH", city:"Riyadh", country:"Saudi Arabia", flag:"🇸🇦", crewHotel:"Marriott Executive Apartments Riyadh", layoverHours:16, weather:"35°C / Sunny", localTime:"12:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   YYZ: { code:"YYZ", city:"Toronto", country:"Canada", flag:"🇨🇦", crewHotel:"Sheraton Downtown", layoverHours:18, weather:"10°C / Overcast", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   YVR: { code:"YVR", city:"Vancouver", country:"Canada", flag:"🇨🇦", crewHotel:"Marriott Pinnacle", layoverHours:20, weather:"13°C / Rainy", localTime:"01:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   MEX: { code:"MEX", city:"Mexico City", country:"Mexico", flag:"🇲🇽", crewHotel:"Intercontinental El Presidente", layoverHours:18, weather:"19°C / Partly Cloudy", localTime:"03:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
-  SCL: { code:"SCL", city:"Santiago", country:"Chile", flag:"🇨🇱", crewHotel:"Hilton Santiago Airport (crew rate: CLP 85,000/night)", layoverHours:18, weather:"18°C / Clear", localTime:"06:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  SCL: { code:"SCL", city:"Santiago", country:"Chile", flag:"🇨🇱", crewHotel:"Hilton Santiago Airport", layoverHours:18, weather:"18°C / Clear", localTime:"06:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   LIM: { code:"LIM", city:"Lima", country:"Peru", flag:"🇵🇪", crewHotel:"Pullman Miraflores", layoverHours:18, weather:"22°C / Overcast", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   BOG: { code:"BOG", city:"Bogota", country:"Colombia", flag:"🇨🇴", crewHotel:"NH Collection Teleport", layoverHours:16, weather:"14°C / Cloudy", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   PTY: { code:"PTY", city:"Panama City", country:"Panama", flag:"🇵🇦", crewHotel:"RIU Plaza Panama", layoverHours:18, weather:"30°C / Humid", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   CTG: { code:"CTG", city:"Cartagena", country:"Colombia", flag:"🇨🇴", crewHotel:"InterContinental", layoverHours:16, weather:"32°C / Sunny", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   GYE: { code:"GYE", city:"Guayaquil", country:"Ecuador", flag:"🇪🇨", crewHotel:"Hotel Oro Verde", layoverHours:16, weather:"28°C / Humid", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   UIO: { code:"UIO", city:"Quito", country:"Ecuador", flag:"🇪🇨", crewHotel:"Dann Carlton Quito", layoverHours:16, weather:"17°C / Clear", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
-  KGL: { code:"KGL", city:"Kigali", country:"Rwanda", flag:"🇷🇼", crewHotel:"Kigali Marriott Hotel (crew rate: USD 120/night)", layoverHours:16, weather:"22°C / Clear", localTime:"11:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  KGL: { code:"KGL", city:"Kigali", country:"Rwanda", flag:"🇷🇼", crewHotel:"Kigali Marriott Hotel", layoverHours:16, weather:"22°C / Clear", localTime:"11:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   DAR: { code:"DAR", city:"Dar es Salaam", country:"Tanzania", flag:"🇹🇿", crewHotel:"Hyatt Regency", layoverHours:16, weather:"30°C / Humid", localTime:"12:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   EBB: { code:"EBB", city:"Entebbe", country:"Uganda", flag:"🇺🇬", crewHotel:"Protea Entebbe", layoverHours:16, weather:"24°C / Partly Cloudy", localTime:"12:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   LOS: { code:"LOS", city:"Lagos", country:"Nigeria", flag:"🇳🇬", crewHotel:"Sheraton Lagos Hotel & Towers", layoverHours:16, weather:"30°C / Humid", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   ACC: { code:"ACC", city:"Accra", country:"Ghana", flag:"🇬🇭", crewHotel:"Moevenpick Ambassador", layoverHours:16, weather:"28°C / Sunny", localTime:"09:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   BEG: { code:"BEG", city:"Belgrade", country:"Serbia", flag:"🇷🇸", crewHotel:"Hilton Belgrade", layoverHours:14, weather:"13°C / Clear", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
-  LJU: { code:"LJU", city:"Ljubljana", country:"Slovenia", flag:"🇸🇮", crewHotel:"City Hotel Ljubljana (crew rate: €95/night)", layoverHours:14, weather:"12°C / Cloudy", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  LJU: { code:"LJU", city:"Ljubljana", country:"Slovenia", flag:"🇸🇮", crewHotel:"City Hotel Ljubljana", layoverHours:14, weather:"12°C / Cloudy", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   ZAG: { code:"ZAG", city:"Zagreb", country:"Croatia", flag:"🇭🇷", crewHotel:"Sheraton Zagreb", layoverHours:14, weather:"13°C / Partly Cloudy", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
-  SKP: { code:"SKP", city:"Skopje", country:"North Macedonia", flag:"🇲🇰", crewHotel:"Marriott Skopje (crew rate: MKD 5,500/night)", layoverHours:14, weather:"14°C / Clear", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  SKP: { code:"SKP", city:"Skopje", country:"North Macedonia", flag:"🇲🇰", crewHotel:"Marriott Skopje", layoverHours:14, weather:"14°C / Clear", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
 
-  GEO: { code:"GEO", city:"Georgetown", country:"Guyana", flag:"🇬🇾", crewHotel:"Cara Lodge Georgetown (crew rate: USD 95/night)", layoverHours:16, weather:"28°C / Humid", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  GEO: { code:"GEO", city:"Georgetown", country:"Guyana", flag:"🇬🇾", crewHotel:"Cara Lodge Georgetown", layoverHours:16, weather:"28°C / Humid", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
   PBM: { code:"PBM", city:"Paramaribo", country:"Suriname", flag:"🇸🇷", crewHotel:"Torarica", layoverHours:16, weather:"29°C / Partly Cloudy", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
   ATL: { code:"ATL", city:"Atlanta", country:"United States", flag:"🇺🇸", crewHotel:"JW Marriott Atlanta Buckhead", layoverHours:18, weather:"20°C / Partly Cloudy", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   AUS: { code:"AUS", city:"Austin", country:"United States", flag:"🇺🇸", crewHotel:"Fairmont Austin", layoverHours:18, weather:"25°C / Sunny", localTime:"03:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
-  DTW: { code:"DTW", city:"Detroit", country:"United States", flag:"🇺🇸", crewHotel:"Detroit Marriott at the Renaissance Center (crew rate: $145/night)", layoverHours:16, weather:"8°C / Cloudy", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  DTW: { code:"DTW", city:"Detroit", country:"United States", flag:"🇺🇸", crewHotel:"Detroit Marriott at the Renaissance Center", layoverHours:16, weather:"8°C / Cloudy", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   IAH: { code:"IAH", city:"Houston", country:"United States", flag:"🇺🇸", crewHotel:"The Chifley", layoverHours:18, weather:"27°C / Humid", localTime:"03:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   LAS: { code:"LAS", city:"Las Vegas", country:"United States", flag:"🇺🇸", crewHotel:"The Westin Las Vegas", layoverHours:16, weather:"32°C / Sunny", localTime:"01:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   MIA: { code:"MIA", city:"Miami", country:"United States", flag:"🇺🇸", crewHotel:"Kimpton EPIC", layoverHours:20, weather:"28°C / Sunny", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
@@ -199,7 +199,7 @@ const DESTINATIONS = {
 
   DMM: { code:"DMM", city:"Dammam", country:"Saudi Arabia", flag:"🇸🇦", crewHotel:"Dana Rayhaan by Rotana", layoverHours:16, weather:"35°C / Sunny", localTime:"12:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
-  JRO: { code:"JRO", city:"Kilimanjaro / Arusha", country:"Tanzania", flag:"🇹🇿", crewHotel:"Gran Melia Arusha (crew rate: USD 115/night)", layoverHours:14, weather:"26°C / Partly Cloudy", localTime:"12:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  JRO: { code:"JRO", city:"Kilimanjaro / Arusha", country:"Tanzania", flag:"🇹🇿", crewHotel:"Gran Melia Arusha", layoverHours:14, weather:"26°C / Partly Cloudy", localTime:"12:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
   CPT: { code:"CPT", city:"Cape Town", country:"South Africa", flag:"🇿🇦", crewHotel:"The Westin", layoverHours:22, weather:"20°C / Sunny", localTime:"11:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
@@ -209,7 +209,7 @@ const DESTINATIONS = {
 
   SJO: { code:"SJO", city:"San José", country:"Costa Rica", flag:"🇨🇷", crewHotel:"Crowne Plaza Corobici", layoverHours:16, weather:"22°C / Partly Cloudy", localTime:"04:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
-  AUA: { code:"AUA", city:"Oranjestad", country:"Aruba", flag:"🇦🇼", crewHotel:"Amsterdam Manor Boutique Hotel (crew rate: USD 155/night)", layoverHours:18, weather:"28°C / Sunny", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  AUA: { code:"AUA", city:"Oranjestad", country:"Aruba", flag:"🇦🇼", crewHotel:"Amsterdam Manor Boutique Hotel", layoverHours:18, weather:"28°C / Sunny", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
   BON: { code:"BON", city:"Kralendijk", country:"Bonaire", flag:"🇧🇶", crewHotel:"Divi Flamingo Resort", layoverHours:18, weather:"28°C / Sunny", localTime:"05:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
@@ -219,11 +219,11 @@ const DESTINATIONS = {
 
   TPE: { code:"TPE", city:"Taipei", country:"Taiwan", flag:"🇹🇼", crewHotel:"Grand Hyatt", layoverHours:20, weather:"26°C / Partly Cloudy", localTime:"17:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
-  MNL: { code:"MNL", city:"Manila", country:"Philippines", flag:"🇵🇭", crewHotel:"Marriott Manila Hotel (crew rate: PHP 5,500/night)", layoverHours:20, weather:"30°C / Humid", localTime:"17:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  MNL: { code:"MNL", city:"Manila", country:"Philippines", flag:"🇵🇭", crewHotel:"Marriott Manila Hotel", layoverHours:20, weather:"30°C / Humid", localTime:"17:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
-  CGK: { code:"CGK", city:"Jakarta", country:"Indonesia", flag:"🇮🇩", crewHotel:"JW Marriott Hotel Jakarta (crew rate: IDR 1,200,000/night)", layoverHours:18, weather:"30°C / Humid", localTime:"16:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  CGK: { code:"CGK", city:"Jakarta", country:"Indonesia", flag:"🇮🇩", crewHotel:"JW Marriott Hotel Jakarta", layoverHours:18, weather:"30°C / Humid", localTime:"16:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
-  DPS: { code:"DPS", city:"Bali (Denpasar)", country:"Indonesia", flag:"🇮🇩", crewHotel:"Kuta Paradiso Hotel Bali (crew rate: IDR 900,000/night)", layoverHours:22, weather:"29°C / Sunny", localTime:"16:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  DPS: { code:"DPS", city:"Bali (Denpasar)", country:"Indonesia", flag:"🇮🇩", crewHotel:"Kuta Paradiso Hotel Bali", layoverHours:22, weather:"29°C / Sunny", localTime:"16:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
   ICN: { code:"ICN", city:"Seoul", country:"South Korea", flag:"🇰🇷", crewHotel:"Swiss Grand", layoverHours:22, weather:"15°C / Clear", localTime:"18:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
@@ -257,7 +257,7 @@ const DESTINATIONS = {
 
   EDI: { code:"EDI", city:"Edinburgh", country:"United Kingdom", flag:"🇬🇧", crewHotel:"Courtyard by Marriott", layoverHours:18, weather:"10°C / Cloudy", localTime:"09:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
-  EXT: { code:"EXT", city:"Exeter", country:"United Kingdom", flag:"🇬🇧", crewHotel:"Southgate Hotel Exeter (crew rate: £95/night)", layoverHours:12, weather:"12°C / Cloudy", localTime:"09:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  EXT: { code:"EXT", city:"Exeter", country:"United Kingdom", flag:"🇬🇧", crewHotel:"Southgate Hotel Exeter", layoverHours:12, weather:"12°C / Cloudy", localTime:"09:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
   FRA: { code:"FRA", city:"Frankfurt", country:"Germany", flag:"🇩🇪", crewHotel:"Avani Frankfurt", layoverHours:18, weather:"13°C / Partly Cloudy", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
@@ -287,7 +287,7 @@ const DESTINATIONS = {
 
   POZ: { code:"POZ", city:"Poznań", country:"Poland", flag:"🇵🇱", crewHotel:"Sheraton Poznan", layoverHours:14, weather:"11°C / Partly Cloudy", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
-  SOU: { code:"SOU", city:"Southampton", country:"United Kingdom", flag:"🇬🇧", crewHotel:"Southampton Harbour Hotel (crew rate: £120/night)", layoverHours:14, weather:"12°C / Partly Cloudy", localTime:"09:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+  SOU: { code:"SOU", city:"Southampton", country:"United Kingdom", flag:"🇬🇧", crewHotel:"Southampton Harbour Hotel", layoverHours:14, weather:"12°C / Partly Cloudy", localTime:"09:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
 
   SVG: { code:"SVG", city:"Stavanger", country:"Norway", flag:"🇳🇴", crewHotel:"Clarion Stavanger", layoverHours:14, weather:"10°C / Partly Cloudy", localTime:"10:00", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   AAL: { code:"AAL", city:"Aalborg", country:"Denmark", flag:"🇩🇰", crewHotel:"Comwell Hvide Hus", layoverHours:0, weather:"", localTime:"", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
@@ -352,16 +352,22 @@ const CONTINENT_GROUPS = [
   { id: "mideast",  label: "Middle East",                color: "#9B59B6", codes: ["RUH","DMM"] },
 ];
 
-const NOTIFICATIONS = [
-  { id: 1, text: "James R. liked your tip about Dubai shopping", time: "2m ago", read: false, destCode: "DXB", category: "shopping", tipId: 4 },
-  { id: 2, text: "New crew tip for Tokyo from Yuki T.", time: "1h ago", read: false, destCode: "NRT", category: "food", tipId: 1 },
-  { id: 3, text: "Claire D. posted in New York · Food", time: "3h ago", read: true, destCode: "JFK", category: "food", tipId: 2 },
-  { id: 4, text: "Your tip in Dubai received 5 new likes", time: "1d ago", read: true, destCode: "DXB", category: "shopping" },
-];
+const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boolean; destCode: string; category?: string; tipId?: number }> = [];
 
 // ─── HOME ──────────────────────────────────────────────────────────────────────
-function HomeScreen({ onSearch, onDestClick, connections, onToggleConnection }) {
+function HomeScreen({ onSearch, onDestClick, addedTips }) {
   const [query, setQuery] = useState("");
+  const latestTip = (() => {
+    let best: { tip: any; destCode: string; destCity: string; destFlag: string } | null = null;
+    for (const dest of Object.values(DESTINATIONS) as any[]) {
+      for (const tip of [...(dest.crewTips || []), ...((addedTips[dest.code]) || [])]) {
+        if (!best || (tip.date || "") > (best.tip.date || "")) {
+          best = { tip, destCode: dest.code, destCity: dest.city, destFlag: dest.flag };
+        }
+      }
+    }
+    return best;
+  })();
   return (
     <div className="screen">
       <div className="hero-section">
@@ -380,7 +386,7 @@ function HomeScreen({ onSearch, onDestClick, connections, onToggleConnection }) 
         </div>
       </div>
       <div className="section-block">
-        <div className="section-label">RECENT DESTINATIONS</div>
+        <div className="section-label">QUICK ACCESS</div>
         <div className="dest-row">
           {["DXB","NRT","JFK"].map(code => {
             const d = DESTINATIONS[code];
@@ -393,37 +399,16 @@ function HomeScreen({ onSearch, onDestClick, connections, onToggleConnection }) 
           })}
         </div>
       </div>
-      <div className="section-block">
-        <div className="section-label">CREW ACTIVITY</div>
-        <div className="activity-feed">
-          {[
-            { name: "Claire D.", action: "posted a tip in", dest: "New York", code: "JFK", cat: "🍜 Food", time: "3h ago" },
-            { name: "Yuki T.",   action: "posted a tip in", dest: "Tokyo",    code: "NRT", cat: "🍜 Food", time: "5h ago" },
-            { name: "James R.", action: "posted a tip in", dest: "Dubai",    code: "DXB", cat: "🛌 Rest", time: "1d ago" },
-          ].map((a, i) => (
-            <div key={i} className="activity-item">
-              <div className="activity-avatar">{a.name[0]}</div>
-              <div className="activity-text">
-                <button className="activity-name-btn" onClick={() => onToggleConnection(a.name)}>
-                  {a.name}
-                  <span className="activity-connect-hint">{connections.includes(a.name) ? " ✓" : " +"}</span>
-                </button>
-                {" "}{a.action}{" "}
-                <button className="activity-dest-btn" onClick={() => onDestClick(a.code)}>{a.dest}</button>
-                <div className="activity-meta">{a.cat} · {a.time}</div>
-              </div>
-            </div>
-          ))}
+      {latestTip && (
+        <div className="section-block">
+          <div className="section-label">LATEST FROM THE CREW</div>
+          <button className="top-tip-card" onClick={() => onDestClick(latestTip.destCode)}>
+            <div className="top-tip-dest">{latestTip.destFlag} {latestTip.destCity}</div>
+            <div className="top-tip-text">{latestTip.tip.text}</div>
+            <div className="top-tip-author">— {latestTip.tip.name}, {latestTip.tip.role} · 👍 {latestTip.tip.likes || 0}</div>
+          </button>
         </div>
-      </div>
-      <div className="section-block">
-        <div className="section-label">TOP RATED TIP THIS WEEK</div>
-        <div className="top-tip-card">
-          <div className="top-tip-dest">🇺🇸 New York</div>
-          <div className="top-tip-text">"Smorgasburg in Williamsburg on Saturdays — 100 food vendors, $5–12 per dish, best food market in the world."</div>
-          <div className="top-tip-author">— Claire D., Senior Purser · 👍 31</div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1288,16 +1273,18 @@ function NotificationsScreen({ onBack, notes, onMarkAllRead, onNotificationClick
       <div className="screen-topbar">
         <button className="back-btn-flat" onClick={onBack}>← Back</button>
         <div className="screen-topbar-title">Notifications</div>
-        <button className="mark-read-btn" onClick={onMarkAllRead}>Mark all read</button>
+        {notes.length > 0 && <button className="mark-read-btn" onClick={onMarkAllRead}>Mark all read</button>}
       </div>
       <div className="content-pad">
-        {notes.map(n => (
-          <button key={n.id} className={`notif-item${n.read ? "" : " unread"}`} onClick={() => n.destCode && onNotificationClick(n)} disabled={!n.destCode}>
-            <div className="notif-dot" style={{ opacity: n.read ? 0 : 1 }} />
-            <div className="notif-text">{n.text}</div>
-            <div className="notif-time">{n.time}</div>
-          </button>
-        ))}
+        {notes.length === 0
+          ? <div className="no-tips">No notifications yet.</div>
+          : notes.map(n => (
+            <button key={n.id} className={`notif-item${n.read ? "" : " unread"}`} onClick={() => n.destCode && onNotificationClick(n)} disabled={!n.destCode}>
+              <div className="notif-dot" style={{ opacity: n.read ? 0 : 1 }} />
+              <div className="notif-text">{n.text}</div>
+              <div className="notif-time">{n.time}</div>
+            </button>
+          ))}
       </div>
     </div>
   );
@@ -2012,7 +1999,7 @@ function AppContent() {
       </div>
 
       {/* SCREENS */}
-      {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} connections={connections} onToggleConnection={toggleConnection} />}
+      {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} />}
       {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
       {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}

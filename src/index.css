@@ -47,11 +47,6 @@
       .connection-info { flex:1; }
       .disconnect-btn { background:none; border:1px solid var(--border); border-radius:6px; padding:5px 10px; font-size:11px; color:var(--text2); cursor:pointer; }
       .disconnect-btn:hover { border-color:rgba(239,68,68,0.4); color:#DC2626; }
-      .activity-name-btn { background:none; border:none; padding:0; font-size:12px; font-weight:500; color:var(--text); cursor:pointer; font-family:'Inter',sans-serif; }
-      .activity-name-btn:hover { color:var(--accent); }
-      .activity-connect-hint { font-size:10px; color:var(--accent); font-weight:700; }
-      .activity-dest-btn { background:none; border:none; padding:0; font-size:12px; color:var(--accent); cursor:pointer; font-family:'Inter',sans-serif; text-decoration:underline; text-decoration-color:rgba(0,161,222,0.4); }
-      .activity-dest-btn:hover { text-decoration-color:var(--accent); }
       .fav-btn { background:none; border:none; padding:4px 6px; font-size:16px; color:var(--text2); cursor:pointer; line-height:1; transition:color 0.15s; }
       .fav-btn:hover { color:#f59e0b; }
       .fav-btn.saved { color:#f59e0b; }
@@ -198,16 +193,7 @@
         .pill-city { font-family:'Inter',sans-serif; font-size:14px; font-weight:600; color:var(--text); }
         .pill-code { font-size:11px; color:var(--text2); }
 
-        .activity-feed { display:flex; flex-direction:column; padding-bottom:16px; }
-        .activity-item { display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-bottom:1px solid var(--border); }
-        .activity-item:last-child { border-bottom:none; }
-        .activity-avatar { width:32px; height:32px; background:linear-gradient(135deg,#0070C0,#2563eb); border-radius:50%; display:flex; align-items:center; justify-content:center; font-family:'Inter',sans-serif; font-weight:700; font-size:13px; color:white; flex-shrink:0; }
-        .activity-text { font-size:12px; color:var(--text3); line-height:1.5; }
-        .activity-name { color:var(--text); font-weight:500; }
-        .activity-dest { color:var(--accent); }
-        .activity-meta { font-size:11px; color:var(--text2); margin-top:2px; }
-
-        .top-tip-card { background: linear-gradient(135deg, rgba(0,112,192,0.06), rgba(0,112,192,0.03)); border: 1px solid rgba(0,112,192,0.18); border-radius:14px; padding:18px; margin-bottom:24px; }
+        .top-tip-card { display:block; width:100%; text-align:left; cursor:pointer; background: linear-gradient(135deg, rgba(0,112,192,0.06), rgba(0,112,192,0.03)); border: 1px solid rgba(0,112,192,0.18); border-radius:14px; padding:18px; margin-bottom:24px; font-family:'Inter',sans-serif; }
 
         .top-tip-dest { font-size:11px; color:var(--accent); letter-spacing:1px; margin-bottom:8px; }
         .top-tip-text { font-size:13px; color:var(--text3); line-height:1.6; margin-bottom:10px; font-style:italic; }
