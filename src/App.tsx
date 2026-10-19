@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.7.1";
+const APP_VERSION = "0.8.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -299,6 +299,18 @@ const DESTINATIONS = {
   TRN: { code:"TRN", city:"Turin", country:"Italy", flag:"🇮🇹", crewHotel:"", layoverHours:0, weather:"", localTime:"", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   VLC: { code:"VLC", city:"Valencia", country:"Spain", flag:"🇪🇸", crewHotel:"", layoverHours:0, weather:"", localTime:"", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
   WRO: { code:"WRO", city:"Wroclaw", country:"Poland", flag:"🇵🇱", crewHotel:"", layoverHours:0, weather:"", localTime:"", categories:{ food:{headline:"",tips:[]}, fitness:{headline:"",tips:[]}, beauty:{headline:"",tips:[]}, wellness:{headline:"",tips:[]}, shopping:{headline:"",tips:[]}, nightlife:{headline:"",tips:[]}, accommodation:{headline:"",tips:[]}, working:{headline:"",tips:[]}, gems:{headline:"",tips:[]}, other:{headline:"",tips:[]} }, crewTips:[] },
+};
+
+const CONTINENT_ORDER = ["Europe", "Africa", "Middle East", "Asia", "Oceania", "North America", "Caribbean & Central America", "South America"];
+const COUNTRY_CONTINENT: Record<string, string> = {
+  "Austria":"Europe","Belgium":"Europe","Croatia":"Europe","Czech Republic":"Europe","Denmark":"Europe","Finland":"Europe","France":"Europe","Germany":"Europe","Hungary":"Europe","Ireland":"Europe","Italy":"Europe","Luxembourg":"Europe","Netherlands":"Europe","North Macedonia":"Europe","Norway":"Europe","Poland":"Europe","Portugal":"Europe","Serbia":"Europe","Slovenia":"Europe","Spain":"Europe","Sweden":"Europe","Switzerland":"Europe","United Kingdom":"Europe",
+  "Ghana":"Africa","Kenya":"Africa","Nigeria":"Africa","Rwanda":"Africa","South Africa":"Africa","Tanzania":"Africa","Uganda":"Africa",
+  "Saudi Arabia":"Middle East","United Arab Emirates":"Middle East",
+  "China":"Asia","China (SAR)":"Asia","India":"Asia","Indonesia":"Asia","Japan":"Asia","Malaysia":"Asia","Philippines":"Asia","Singapore":"Asia","South Korea":"Asia","Taiwan":"Asia","Thailand":"Asia",
+  "Australia":"Oceania",
+  "Canada":"North America","Mexico":"North America","United States":"North America",
+  "Aruba":"Caribbean & Central America","Bonaire":"Caribbean & Central America","Costa Rica":"Caribbean & Central America","Curaçao":"Caribbean & Central America","Panama":"Caribbean & Central America","Sint Maarten / Saint-Martin":"Caribbean & Central America","Trinidad & Tobago":"Caribbean & Central America",
+  "Argentina":"South America","Brazil":"South America","Chile":"South America","Colombia":"South America","Ecuador":"South America","Guyana":"South America","Peru":"South America","Suriname":"South America",
 };
 
 const CATEGORIES = [
@@ -830,6 +842,10 @@ function osmCategoryGuess(cls: string, type: string): string {
 
 function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defaultCategory }) {
   const allDests = Object.values(DESTINATIONS) as any[];
+  const destsByContinent = CONTINENT_ORDER.map(continent => ({
+    continent,
+    dests: allDests.filter(d => (COUNTRY_CONTINENT[d.country] || "Other") === continent).sort((a, b) => a.city.localeCompare(b.city)),
+  })).filter(g => g.dests.length > 0);
   const [destCode, setDestCode] = useState(selectedDest || "");
   const [place, setPlace] = useState("");
   const [category, setCategory] = useState(defaultCategory || "food");
@@ -966,7 +982,11 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           <label className="form-lbl">Destination</label>
           <select className="form-sel" value={destCode} onChange={e => { setDestCode(e.target.value); setPlace(""); setPlaceCoords(null); setSuggestions([]); }}>
             <option value="">— Select city —</option>
-            {allDests.map(d => <option key={d.code} value={d.code}>{d.flag} {d.city}</option>)}
+            {destsByContinent.map(g => (
+              <optgroup key={g.continent} label={g.continent}>
+                {g.dests.map(d => <option key={d.code} value={d.code}>{d.flag} {d.city}</option>)}
+              </optgroup>
+            ))}
           </select>
         </div>
 
