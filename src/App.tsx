@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.10.0";
+const APP_VERSION = "0.11.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -1597,31 +1597,26 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
 }
 
 // ─── CATEGORY MENU ─────────────────────────────────────────────────────────────
-function CategoryMenu({ onClose, activeCategory, setActiveCategory, selectedDest, onNavigateDest }) {
+function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips }) {
   return (
     <div className="cat-menu-backdrop" onClick={onClose}>
       <div className="cat-menu-sheet" onClick={e => e.stopPropagation()}>
         <div className="cat-menu-handle" />
         <div className="cat-menu-title">Browse by Category</div>
-        {selectedDest && (
-          <div className="cat-menu-dest">{DESTINATIONS[selectedDest].flag} {DESTINATIONS[selectedDest].city}</div>
-        )}
-        {!selectedDest && (
-          <div className="cat-menu-dest">Search a destination first to jump to a category</div>
-        )}
+        <div className="cat-menu-dest">Latest tips across every destination</div>
         <div className="cat-menu-list">
           {CATEGORIES.map(cat => {
-            const count = selectedDest ? DESTINATIONS[selectedDest].crewTips.filter(t => t.category === cat.id).length : 0;
+            const count = (Object.values(DESTINATIONS) as any[]).reduce(
+              (sum, d) => sum + [...(d.crewTips || []), ...((addedTips[d.code]) || [])].filter((t: any) => t.category === cat.id).length,
+              0
+            );
             const isActive = activeCategory === cat.id;
             return (
               <button key={cat.id}
                 className={`cat-menu-item${isActive ? " active" : ""}`}
-                onClick={() => {
-                  setActiveCategory(cat.id);
-                  onNavigateDest();
-                  onClose();
-                }}
+                onClick={() => { onSelectCategory(cat.id); onClose(); }}
               >
+                <span className="cat-menu-icon">{cat.icon}</span>
                 <span className="cat-menu-label">{cat.label}</span>
                 {count > 0 && <span className="cat-menu-badge">{count} crew tips</span>}
                 {isActive && <span className="cat-menu-tick">✓</span>}
@@ -1629,6 +1624,56 @@ function CategoryMenu({ onClose, activeCategory, setActiveCategory, selectedDest
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CATEGORY FEED ─────────────────────────────────────────────────────────────
+function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipClick }) {
+  const cat = CATEGORIES.find(c => c.id === category);
+  const results: Array<{ tip: any; destCode: string; destCity: string }> = [];
+  for (const dest of Object.values(DESTINATIONS) as any[]) {
+    const allTips = [...(dest.crewTips || []), ...((addedTips[dest.code]) || [])];
+    for (const tip of allTips) {
+      if (tip.category === category) results.push({ tip, destCode: dest.code, destCity: dest.city });
+    }
+  }
+  results.sort((a, b) => (b.tip.date || "").localeCompare(a.tip.date || ""));
+
+  return (
+    <div className="screen">
+      <div className="screen-topbar">
+        <button className="back-btn-flat" onClick={onBack}>← Back</button>
+        <div className="screen-topbar-title">{cat?.icon} {cat?.label}</div>
+      </div>
+      <div className="content-pad">
+        <div className="search-results-meta">{results.length} recent tip{results.length !== 1 ? "s" : ""}, every destination mixed together</div>
+        {results.length === 0
+          ? <div className="no-tips">No {cat?.label.toLowerCase()} tips yet. Be the first to add one!</div>
+          : results.map((r, i) => (
+            <div key={i} className="search-result-item">
+              <button className="search-result-dest" onClick={() => onDestClick(r.destCode)}>
+                {(DESTINATIONS as any)[r.destCode]?.flag} {r.destCity} · {r.destCode}
+              </button>
+              <button className="crew-card search-result-card" onClick={() => onTipClick(r.destCode, r.tip.id, r.tip.category)}>
+                <div className="crew-card-top">
+                  <div className="crew-av">{r.tip.name?.[0]}</div>
+                  <div>
+                    <div className="crew-card-name">{r.tip.name}</div>
+                    <div className="crew-card-role">{r.tip.role}</div>
+                  </div>
+                  <div className="crew-card-date">{r.tip.date}</div>
+                </div>
+                <p className="crew-card-text">{r.tip.text}</p>
+                {r.tip.tags && r.tip.tags.length > 0 && (
+                  <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
+                )}
+                <div className="search-result-cta">View recommendation →</div>
+              </button>
+            </div>
+          ))
+        }
       </div>
     </div>
   );
@@ -1971,6 +2016,7 @@ function AppContent() {
       {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
       {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
       {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
+      {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
       {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
       {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} />}
       {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
@@ -1987,7 +2033,7 @@ function AppContent() {
         <div className="bnav-fab-wrap">
           <button className="bnav-fab" onClick={() => { setAddTipContext({ code: null, category: null }); setScreen("addrecommendation"); }}>+</button>
         </div>
-        <button className={`bnav-item${showCatMenu ? " active" : ""}`} onClick={() => { setShowCatMenu(v => !v); setShowDestMenu(false); }} disabled={!selectedDest}>
+        <button className={`bnav-item${showCatMenu || screen === "categoryfeed" ? " active" : ""}`} onClick={() => { setShowCatMenu(v => !v); setShowDestMenu(false); }}>
           Categories
         </button>
         <button className={`bnav-item${screen === "favorites" ? " active" : ""}`} onClick={() => setScreen("favorites")}>
@@ -2009,9 +2055,8 @@ function AppContent() {
         <CategoryMenu
           onClose={() => setShowCatMenu(false)}
           activeCategory={activeCategory}
-          setActiveCategory={setActiveCategory}
-          selectedDest={selectedDest}
-          onNavigateDest={() => { if (screen !== "dest") setScreen("dest"); }}
+          addedTips={addedTips}
+          onSelectCategory={(catId: string) => { setActiveCategory(catId); setScreen("categoryfeed"); }}
         />
       )}
     </div>
