@@ -224,7 +224,7 @@
         .dest-meta-chip { background:#FFFFFF; border:1px solid var(--border); border-radius:20px; padding:5px 12px; font-size:11px; color:var(--text3); }
         .map-view-btn { display:inline-flex; align-items:center; margin-top:12px; background:#003082; border:1px solid rgba(0,161,222,0.4); border-radius:20px; padding:7px 16px; font-size:12px; font-family:'Inter',sans-serif; font-weight:600; color:rgba(255,255,255,0.9); cursor:pointer; transition:background 0.15s; }
         .map-view-btn:hover { background:#004aaa; }
-        .map-overlay { position:fixed; inset:0; z-index:400; display:flex; flex-direction:column; background:#fff; max-width:480px; margin:0 auto; animation:screenIn 0.2s ease; }
+        .map-overlay { position:fixed; top:0; left:0; right:0; bottom:68px; z-index:400; display:flex; flex-direction:column; background:#fff; max-width:480px; margin:0 auto; animation:screenIn 0.2s ease; }
         .map-header { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:#003082; border-bottom:1px solid rgba(0,161,222,0.25); flex-shrink:0; }
         .map-header-title { font-family:'Inter',sans-serif; font-size:15px; font-weight:700; color:white; }
         .map-close-btn { background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); border-radius:20px; padding:6px 14px; font-size:12px; color:white; cursor:pointer; font-family:'DM Mono',monospace; }
