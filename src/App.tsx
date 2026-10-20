@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.6.1";
+const APP_VERSION = "1.7.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -38,6 +38,20 @@ async function geocodeHotel(crewHotel: string, city: string, country: string): P
   const name = crewHotel.replace(/\s*\([^)]*\)\s*$/, "").trim();
   const key = `hotel:${name},${city},${country}`;
   if (cityCenterCache[key]) return cityCenterCache[key];
+  // An audit of every destination's crew hotel found Nominatim/OSM simply has no data for ~30%
+  // of them (Mexico City's among them) -- the map silently fell back to a city-wide view with no
+  // indication why. Google Places' "Find Place" is built for resolving a named business like
+  // this and covers hotels far more completely, so it goes first now.
+  try {
+    if (await loadGoogleMaps() && ensurePlacesServices()) {
+      const found = await googleFindPlace(`${name}, ${city}, ${country}`);
+      if (found?.geometry?.location) {
+        const center = { lat: found.geometry.location.lat(), lng: found.geometry.location.lng() };
+        cityCenterCache[key] = center;
+        return center;
+      }
+    }
+  } catch {}
   try {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${name}, ${city}, ${country}`)}&format=json&limit=1`;
     const res = await fetch(url, { headers: { Accept: "application/json" } });
@@ -94,6 +108,15 @@ function googlePlaceDetails(placeId: string): Promise<any | null> {
     try {
       placesService.getDetails({ placeId, fields: ["name", "formatted_address", "geometry", "opening_hours"] }, (place: any, status: string) => {
         resolve(status === "OK" ? place : null);
+      });
+    } catch { resolve(null); }
+  });
+}
+function googleFindPlace(query: string): Promise<any | null> {
+  return new Promise(resolve => {
+    try {
+      placesService.findPlaceFromQuery({ query, fields: ["place_id", "geometry"] }, (results: any, status: string) => {
+        resolve(status === "OK" && results?.[0] ? results[0] : null);
       });
     } catch { resolve(null); }
   });
