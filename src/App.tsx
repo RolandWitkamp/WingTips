@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.16.0";
+const APP_VERSION = "1.0.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -112,33 +112,204 @@ function useWeather(code: string, city: string, country: string) {
   return weather;
 }
 
-function useConnections() {
-  const [connections, setConnections] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wt_connections") || "[]") as string[]; }
-    catch { return [] as string[]; }
-  });
+// Profile, favorites, connections and recently-visited destinations all used to live only in
+// this browser's localStorage, so a second device (or a fresh browser) always started empty.
+// This hook keeps the same shape every screen already expects, but backs it with the `profiles`,
+// `favorites` and `connections` tables (see supabase_schema.sql) so it follows the account.
+function useCloudProfile() {
+  const [loaded, setLoaded] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [profile, setProfile] = useState({ name: "", role: "Cabin Crew", base: "AMS", bio: "" });
+  const [recentDests, setRecentDests] = useState<string[]>([]);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [favoritesSeen, setFavoritesSeen] = useState<string[]>([]);
+  const [connections, setConnections] = useState<string[]>([]);
+
   useEffect(() => {
-    localStorage.setItem("wt_connections", JSON.stringify(connections));
-  }, [connections]);
-  function toggle(name: string) {
-    setConnections((prev: string[]) =>
-      prev.includes(name) ? prev.filter((n: string) => n !== name) : [...prev, name]
-    );
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+      setUserId(user.id);
+
+      let { data: row } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+      if (!row) {
+        const { data: inserted } = await supabase.from("profiles").insert({ id: user.id }).select().maybeSingle();
+        row = inserted;
+      }
+      if (row && !cancelled) {
+        setProfile({ name: row.name || "", role: row.role || "Cabin Crew", base: row.base || "AMS", bio: row.bio || "" });
+        setRecentDests(row.recent_destinations || []);
+        setFavoritesSeen(row.favorites_seen || []);
+      }
+
+      const [{ data: favRows }, { data: connRows }] = await Promise.all([
+        supabase.from("favorites").select("tip_key").eq("user_id", user.id),
+        supabase.from("connections").select("crew_name").eq("user_id", user.id),
+      ]);
+      if (!cancelled) {
+        setFavorites((favRows || []).map((r: any) => r.tip_key));
+        setConnections((connRows || []).map((r: any) => r.crew_name));
+        setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function updateProfile(updates: any) {
+    setProfile((p: any) => ({ ...p, ...updates }));
+    if (userId) await supabase.from("profiles").update(updates).eq("id", userId);
   }
-  return { connections, toggle };
+
+  function visitDest(code: string) {
+    setRecentDests((prev: string[]) => {
+      const next = [code, ...prev.filter((c: string) => c !== code)].slice(0, 8);
+      if (userId) supabase.from("profiles").update({ recent_destinations: next }).eq("id", userId).then(() => {});
+      return next;
+    });
+  }
+
+  async function toggleFavorite(key: string) {
+    if (!userId) return;
+    const has = favorites.includes(key);
+    setFavorites((prev: string[]) => has ? prev.filter((k: string) => k !== key) : [...prev, key]);
+    if (has) await supabase.from("favorites").delete().eq("user_id", userId).eq("tip_key", key);
+    else await supabase.from("favorites").insert({ user_id: userId, tip_key: key });
+  }
+
+  function markFavoritesSeen() {
+    setFavoritesSeen(favorites);
+    if (userId) supabase.from("profiles").update({ favorites_seen: favorites }).eq("id", userId).then(() => {});
+  }
+  const unseenFavorites = favorites.filter(k => !favoritesSeen.includes(k)).length;
+
+  async function toggleConnection(name: string) {
+    if (!userId) return;
+    const has = connections.includes(name);
+    setConnections((prev: string[]) => has ? prev.filter((n: string) => n !== name) : [...prev, name]);
+    if (has) await supabase.from("connections").delete().eq("user_id", userId).eq("crew_name", name);
+    else await supabase.from("connections").insert({ user_id: userId, crew_name: name });
+  }
+
+  return {
+    loaded, profile, updateProfile,
+    recentDests, visitDest,
+    favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
+    connections, toggleConnection,
+  };
 }
 
-function useProfile() {
-  const [profile, setProfile] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wt_profile") || "null") || { name: "", role: "Cabin Crew", base: "AMS", bio: "" }; }
-    catch { return { name: "", role: "Cabin Crew", base: "AMS", bio: "" }; }
-  });
-  function updateProfile(updates: any) {
-    const next = { ...profile, ...updates };
-    setProfile(next);
-    localStorage.setItem("wt_profile", JSON.stringify(next));
+// Recommendations ("crew tips") used to be written only to this browser's localStorage, so no
+// one else ever saw a tip someone added -- the whole point of a crew-shared guide. Now backed by
+// the `recommendations`/`recommendation_comments`/`recommendation_likes` tables: every signed-in
+// crew member reads the same data, and a like/comment is a real row instead of local-only state.
+function useRecommendations() {
+  const [recs, setRecs] = useState<any[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  async function reload() {
+    const { data: { user } } = await supabase.auth.getUser();
+    const uid = user?.id || null;
+    const [{ data: recRows }, { data: commentRows }, { data: likeRows }] = await Promise.all([
+      supabase.from("recommendations").select("*").order("created_at", { ascending: false }),
+      supabase.from("recommendation_comments").select("*").order("created_at", { ascending: true }),
+      supabase.from("recommendation_likes").select("recommendation_id, user_id"),
+    ]);
+    const commentsByRec: Record<string, any[]> = {};
+    (commentRows || []).forEach((c: any) => {
+      (commentsByRec[c.recommendation_id] ||= []).push({ id: c.id, name: c.name, role: c.role, text: c.text, date: (c.created_at || "").slice(0, 10) });
+    });
+    const likesByRec: Record<string, { count: number; mine: boolean }> = {};
+    (likeRows || []).forEach((l: any) => {
+      const bucket = (likesByRec[l.recommendation_id] ||= { count: 0, mine: false });
+      bucket.count++;
+      if (l.user_id === uid) bucket.mine = true;
+    });
+    const mapped = (recRows || []).map((r: any) => ({
+      id: r.id,
+      destCode: r.destination_code,
+      category: r.category,
+      name: r.author_name,
+      role: r.author_role,
+      text: r.text,
+      date: (r.created_at || "").slice(0, 10),
+      price: r.price || undefined,
+      hours: r.hours || undefined,
+      discount: r.discount === "true" ? true : (r.discount || undefined),
+      tags: r.tags || undefined,
+      photo: r.photo || undefined,
+      coords: r.coords || undefined,
+      comments: commentsByRec[r.id] || [],
+      likes: likesByRec[r.id]?.count || 0,
+      likedByMe: likesByRec[r.id]?.mine || false,
+    }));
+    setRecs(mapped);
+    setLoaded(true);
   }
-  return { profile, updateProfile };
+
+  useEffect(() => { reload(); }, []);
+
+  const byDest = useMemo(() => {
+    const grouped: Record<string, any[]> = {};
+    for (const r of recs) (grouped[r.destCode] ||= []).push(r);
+    return grouped;
+  }, [recs]);
+
+  async function addRecommendation(destCode: string, tipData: any, profile: any) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const row = {
+      destination_code: destCode,
+      category: tipData.category,
+      author_id: user.id,
+      author_name: profile.name,
+      author_role: profile.role,
+      text: tipData.text,
+      price: tipData.price || null,
+      hours: tipData.hours || null,
+      discount: tipData.discount === true ? "true" : (tipData.discount || null),
+      tags: tipData.tags || null,
+      photo: tipData.photo || null,
+      coords: tipData.coords || null,
+    };
+    const { data, error } = await supabase.from("recommendations").insert(row).select().maybeSingle();
+    if (error || !data) return null;
+    const newTip = {
+      id: data.id, destCode, category: data.category, name: data.author_name, role: data.author_role,
+      text: data.text, date: (data.created_at || "").slice(0, 10),
+      price: data.price || undefined, hours: data.hours || undefined,
+      discount: data.discount === "true" ? true : (data.discount || undefined),
+      tags: data.tags || undefined, photo: data.photo || undefined, coords: data.coords || undefined,
+      comments: [] as any[], likes: 0, likedByMe: false,
+    };
+    setRecs(prev => [newTip, ...prev]);
+    return newTip;
+  }
+
+  async function toggleLike(tipId: any) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const tip = recs.find(r => r.id === tipId);
+    if (!tip) return;
+    if (tip.likedByMe) {
+      await supabase.from("recommendation_likes").delete().eq("recommendation_id", tipId).eq("user_id", user.id);
+      setRecs(prev => prev.map(r => r.id === tipId ? { ...r, likes: r.likes - 1, likedByMe: false } : r));
+    } else {
+      await supabase.from("recommendation_likes").insert({ recommendation_id: tipId, user_id: user.id });
+      setRecs(prev => prev.map(r => r.id === tipId ? { ...r, likes: r.likes + 1, likedByMe: true } : r));
+    }
+  }
+
+  async function addComment(tipId: any, comment: { name: string; role: string; text: string }) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const row = { recommendation_id: tipId, author_id: user.id, name: comment.name, role: comment.role, text: comment.text };
+    const { data } = await supabase.from("recommendation_comments").insert(row).select().maybeSingle();
+    const newComment = { id: data?.id ?? Date.now(), name: comment.name, role: comment.role, text: comment.text, date: new Date().toISOString().split("T")[0] };
+    setRecs(prev => prev.map(r => r.id === tipId ? { ...r, comments: [...r.comments, newComment] } : r));
+  }
+
+  return { byDest, loaded, addRecommendation, toggleLike, addComment };
 }
 
 const DESTINATIONS = {
@@ -492,45 +663,6 @@ function useNotifications() {
   return { notes, markAllRead };
 }
 
-function useFavorites() {
-  const [favorites, setFavorites] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wt_favorites") || "[]") as string[]; }
-    catch { return [] as string[]; }
-  });
-  const [seen, setSeen] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wt_favorites_seen") || "[]") as string[]; }
-    catch { return [] as string[]; }
-  });
-  useEffect(() => {
-    localStorage.setItem("wt_favorites", JSON.stringify(favorites));
-  }, [favorites]);
-  useEffect(() => {
-    localStorage.setItem("wt_favorites_seen", JSON.stringify(seen));
-  }, [seen]);
-  function toggle(key: string) {
-    setFavorites((prev: string[]) =>
-      prev.includes(key) ? prev.filter((k: string) => k !== key) : [...prev, key]
-    );
-  }
-  function markAllSeen() { setSeen(favorites); }
-  const unseenCount = favorites.filter(k => !seen.includes(k)).length;
-  return { favorites, toggle, unseenCount, markAllSeen };
-}
-
-function useRecentDestinations() {
-  const [recent, setRecent] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("wt_recent_destinations") || "[]") as string[]; }
-    catch { return [] as string[]; }
-  });
-  useEffect(() => {
-    localStorage.setItem("wt_recent_destinations", JSON.stringify(recent));
-  }, [recent]);
-  function visit(code: string) {
-    setRecent((prev: string[]) => [code, ...prev.filter((c: string) => c !== code)].slice(0, 8));
-  }
-  return { recent, visit };
-}
-
 // ─── TIMEZONE OFFSETS (UTC, summer/CEST reference) ────────────────────────────
 const TZ_OFFSETS: Record<string, number> = {
   // Europe CEST +2
@@ -575,7 +707,7 @@ function fmtTime(utcOffset: number) {
 }
 
 // ─── DESTINATION ───────────────────────────────────────────────────────────────
-function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, onToggleConnection, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick }) {
+function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, onToggleConnection, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment }) {
   const dest = DESTINATIONS[code];
   const liveWeather = useWeather(code, dest.city, dest.country);
   const [crewTips, setCrewTips] = useState(
@@ -705,7 +837,8 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     );
 
   function handleLike(id) {
-    setCrewTips(tips => tips.map(t => t.id === id ? { ...t, likes: t.likes + 1 } : t));
+    setCrewTips(tips => tips.map(t => t.id === id ? { ...t, likes: t.likedByMe ? t.likes - 1 : t.likes + 1, likedByMe: !t.likedByMe } : t));
+    onToggleLike?.(id);
   }
 
   function handleAddComment(tipId) {
@@ -722,6 +855,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       t.id === tipId ? { ...t, comments: [...t.comments, newComment] } : t
     ));
     setCommentForms(f => ({ ...f, [tipId]: { name: "", role: "Cabin Crew", text: "" } }));
+    onAddComment?.(tipId, { name: form.name.trim(), role: form.role || "Cabin Crew", text: form.text.trim() });
   }
 
   function updateCommentForm(tipId, field, value) {
@@ -850,7 +984,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                   </div>
                 )}
                 <div className="tip-actions">
-                  <button className="like-btn" onClick={() => handleLike(tip.id)}>❤ {tip.likes}</button>
+                  <button className={`like-btn${tip.likedByMe ? " liked" : ""}`} onClick={() => handleLike(tip.id)}>❤ {tip.likes}</button>
                   <a href={tipMapsUrl(tip, dest)} target="_blank" rel="noreferrer" className="maps-link">📍 Maps</a>
                   <button className="share-btn" onClick={() => shareTip(tip, dest, () => { setCopiedTipId(tip.id); setTimeout(() => setCopiedTipId((id: any) => id === tip.id ? null : id), 1800); })}>
                     {copiedTipId === tip.id ? "✓ Copied" : "↗ Share"}
@@ -964,6 +1098,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [tags, setTags] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
   const [showDonation, setShowDonation] = useState(false);
   const [pendingTip, setPendingTip] = useState<any>(null);
   const [donationAmount, setDonationAmount] = useState<number | null>(null);
@@ -1047,9 +1183,13 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     setShowDonation(true);
   }
 
-  function finalize(donated: boolean) {
+  async function finalize(donated: boolean) {
+    if (submitting) return;
+    setSubmitting(true);
+    const ok = await onSubmit(destCode, pendingTip);
+    setSubmitting(false);
+    if (!ok) { setSubmitError(true); return; }
     setShowDonation(false);
-    onSubmit(destCode, pendingTip);
     setSubmitted(true);
   }
 
@@ -1079,11 +1219,12 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
                 </button>
               ))}
             </div>
-            <button className="donation-btn-primary" onClick={() => finalize(true)} disabled={!donationAmount}>
-              {donationAmount ? `Donate €${donationAmount} & Post` : "Select an amount"}
+            {submitError && <p className="donation-error">Couldn't post your recommendation — check your connection and try again.</p>}
+            <button className="donation-btn-primary" onClick={() => finalize(true)} disabled={!donationAmount || submitting}>
+              {submitting ? "Posting…" : donationAmount ? `Donate €${donationAmount} & Post` : "Select an amount"}
             </button>
-            <button className="donation-btn-skip" onClick={() => finalize(false)}>
-              Skip and post without donating
+            <button className="donation-btn-skip" onClick={() => finalize(false)} disabled={submitting}>
+              {submitting ? "Posting…" : "Skip and post without donating"}
             </button>
           </div>
         </div>
@@ -1444,7 +1585,7 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
   const [draft, setDraft] = useState({ ...profile });
 
   const myTips = Object.entries(addedTips as Record<string, any[]>).flatMap(([code, tips]) =>
-    tips.map(t => ({ ...t, destCode: code, destCity: (DESTINATIONS as any)[code]?.city || code }))
+    tips.filter((t: any) => t.name === profile.name).map(t => ({ ...t, destCode: code, destCity: (DESTINATIONS as any)[code]?.city || code }))
   );
   const totalLikes = myTips.reduce((s, t) => s + (t.likes || 0), 0);
   const initials = profile.name ? profile.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() : "?";
@@ -2070,10 +2211,13 @@ function AppContent() {
   const [showDestMenu, setShowDestMenu] = useState(false);
   const { notes: notifications, markAllRead } = useNotifications();
   const unreadCount = notifications.filter(n => !n.read).length;
-  const { connections, toggle: toggleConnection } = useConnections();
-  const { favorites, toggle: toggleFavorite, unseenCount: unseenFavorites, markAllSeen: markFavoritesSeen } = useFavorites();
-  const { recent: recentDests, visit: visitDest } = useRecentDestinations();
-  const { profile, updateProfile } = useProfile();
+  const {
+    loaded: profileLoaded, profile, updateProfile,
+    recentDests, visitDest,
+    favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
+    connections, toggleConnection,
+  } = useCloudProfile();
+  const { byDest: addedTips, loaded: recsLoaded, addRecommendation, toggleLike, addComment } = useRecommendations();
 
   useEffect(() => {
     if (screen === "dest" && selectedDest) visitDest(selectedDest);
@@ -2082,20 +2226,14 @@ function AppContent() {
   useEffect(() => {
     if (screen === "favorites") markFavoritesSeen();
   }, [screen]);
-  const [addedTips, setAddedTips] = useState<Record<string, any[]>>(() => {
-    try { return JSON.parse(localStorage.getItem("wt_added_tips") || "{}"); }
-    catch { return {}; }
-  });
   const [searchQuery, setSearchQuery] = useState("");
 
-  function handleRecommendationSubmitted(code: string, tip: any) {
-    setAddedTips((prev: Record<string, any[]>) => {
-      const updated = { ...prev, [code]: [...(prev[code] || []), tip] };
-      localStorage.setItem("wt_added_tips", JSON.stringify(updated));
-      return updated;
-    });
+  async function handleRecommendationSubmitted(code: string, tip: any) {
+    const saved = await addRecommendation(code, tip, profile);
+    if (!saved) return false;
     setSelectedDest(code);
     setScreen("dest");
+    return true;
   }
 
   function handleSearch(q: string) {
@@ -2114,6 +2252,10 @@ function AppContent() {
   }
 
   function handleAddTip(code, category) { setSelectedDest(code); setAddTipContext({ code, category }); setScreen("addrecommendation"); }
+
+  if (!profileLoaded || !recsLoaded) {
+    return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)",fontSize:24}}>✈</div></div>;
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: "var(--text)", maxWidth: 480, margin: "0 auto", position: "relative" }}>
@@ -2134,7 +2276,7 @@ function AppContent() {
 
       {/* SCREENS */}
       {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
-      {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
+      {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} />}
       {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
       {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
       {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}

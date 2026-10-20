@@ -111,6 +111,7 @@
       .donation-btn-primary:disabled { background:#CBD5E1; cursor:not-allowed; }
       .donation-btn-primary:not(:disabled):hover { background:#0090C8; }
       .donation-btn-skip { background:none; border:none; font-size:13px; color:var(--text2); cursor:pointer; font-family:'Inter',sans-serif; text-decoration:underline; text-decoration-color:rgba(0,0,0,0.2); }
+      .donation-error { font-size:12px; color:#DC2626; background:rgba(220,38,38,0.08); border-radius:8px; padding:8px 12px; margin-bottom:10px; }
       .tip-photo { width:100%; max-height:180px; object-fit:cover; border-radius:10px; margin-bottom:8px; display:block; }
       .rec-cat-row { display:flex; flex-wrap:wrap; gap:8px; }
       .rec-cat-chip { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 12px; font-size:12px; color:var(--text2); cursor:pointer; font-family:'Inter',sans-serif; transition:all 0.15s; }
@@ -261,6 +262,7 @@
         .crew-card-text { font-size:13px; color:var(--text3); line-height:1.6; margin-bottom:10px; }
         .like-btn { background:#F1F5F9; border:1px solid var(--border); border-radius:6px; padding:4px 10px; font-size:12px; color:var(--text2); cursor:pointer; }
         .like-btn:hover { background:rgba(239,68,68,0.08); color:#DC2626; }
+        .like-btn.liked { background:rgba(239,68,68,0.1); border-color:rgba(239,68,68,0.3); color:#DC2626; font-weight:600; }
 
         .form-header { display:flex; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border); }
         .back-btn-flat { background:none; border:none; cursor:pointer; font-family:'DM Mono',monospace; font-size:12px; color:var(--text2); padding:0; }
