@@ -156,7 +156,7 @@
         .bnav-item:disabled { opacity:0.3; cursor:not-allowed; }
         .bnav-icon { font-size:20px; line-height:1; }
 
-        .screen { flex:1; overflow-y:auto; animation:screenIn 0.18s ease; }
+        .screen { flex:1; overflow-y:auto; animation:screenIn 0.18s ease; position:relative; }
         .auth-screen { display:flex; flex-direction:column; align-items:center; padding:60px 28px 40px; width:100%; box-sizing:border-box; }
         .auth-logo { font-size:22px; font-weight:800; color:#003082; letter-spacing:-0.5px; margin-bottom:32px; font-family:'Inter',sans-serif; }
         .auth-title { font-size:24px; font-weight:800; color:var(--text); margin-bottom:6px; font-family:'Inter',sans-serif; }
@@ -219,7 +219,12 @@
         .dest-meta-chip { background:#FFFFFF; border:1px solid var(--border); border-radius:20px; padding:5px 12px; font-size:11px; color:var(--text3); }
         .map-view-btn { display:inline-flex; align-items:center; margin-top:12px; background:#003082; border:1px solid rgba(0,161,222,0.4); border-radius:20px; padding:7px 16px; font-size:12px; font-family:'Inter',sans-serif; font-weight:600; color:rgba(255,255,255,0.9); cursor:pointer; transition:background 0.15s; }
         .map-view-btn:hover { background:#004aaa; }
-        .map-overlay { position:fixed; top:var(--topnav-h, 60px); left:0; right:0; bottom:68px; z-index:400; display:flex; flex-direction:column; background:#fff; max-width:480px; margin:0 auto; animation:screenIn 0.2s ease; }
+        /* Positioned absolute within .screen (which already sits correctly between the top and
+           bottom nav via the same flex:1 sizing every screen uses) rather than position:fixed
+           with a guessed/measured viewport offset -- that kept coming up wrong on iOS Safari
+           (toolbar-driven viewport quirks), this can't be wrong since it's just filling its
+           already-correctly-bounded parent. */
+        .map-overlay { position:absolute; inset:0; z-index:400; display:flex; flex-direction:column; background:#fff; animation:screenIn 0.2s ease; }
         .map-header { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:#003082; border-bottom:1px solid rgba(0,161,222,0.25); flex-shrink:0; }
         .map-header-title { font-family:'Inter',sans-serif; font-size:15px; font-weight:700; color:white; }
         .map-close-btn { background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); border-radius:20px; padding:6px 14px; font-size:12px; color:white; cursor:pointer; font-family:'DM Mono',monospace; }
@@ -329,7 +334,10 @@
         .my-tip-text { font-size:13px; color:var(--text3); line-height:1.6; margin-bottom:8px; }
         .my-tip-likes { font-size:12px; color:var(--text2); }
 
-        .cat-menu-backdrop { position:fixed; top:var(--topnav-h, 60px); left:0; right:0; bottom:68px; background:rgba(0,0,0,0.65); z-index:200; display:flex; align-items:flex-end; justify-content:center; animation:backdropIn 0.2s ease; }
+        /* Same reasoning as .map-overlay: positioned within the screen-area wrapper (bounded by
+           the same flex:1 sizing as every screen) instead of position:fixed with a viewport
+           offset that iOS Safari kept rendering wrong. */
+        .cat-menu-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.65); z-index:200; display:flex; align-items:flex-end; justify-content:center; animation:backdropIn 0.2s ease; }
         @keyframes backdropIn { from{opacity:0} to{opacity:1} }
         .cat-menu-sheet { width:100%; max-width:480px; background:#FFFFFF; border-radius:20px 20px 0 0; border-top:1px solid var(--border); padding:12px 0 40px; animation:sheetUp 0.28s cubic-bezier(0.32,0.72,0,1); }
         @keyframes sheetUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
