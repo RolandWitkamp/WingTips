@@ -311,6 +311,7 @@
         .pef-textarea { resize:none; line-height:1.5; }
         .pef-save-btn { width:100%; max-width:360px; background:#003082; color:white; border:none; border-radius:12px; padding:14px; font-size:15px; font-weight:700; cursor:pointer; }
         .pef-save-btn:disabled { opacity:0.4; cursor:not-allowed; }
+        .pef-error { font-size:12px; color:#DC2626; background:rgba(220,38,38,0.08); border-radius:8px; padding:8px 12px; margin:4px 0; }
         .stats-row { display:flex; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
         .stat-box { flex:1; text-align:center; padding:16px; border-right:1px solid var(--border); }
         .stat-box:last-child { border-right:none; }

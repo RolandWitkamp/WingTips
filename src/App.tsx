@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.4.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -130,15 +130,18 @@ function useCloudProfile() {
     if (!user) return;
     setUserId(user.id);
 
-    let { data: row } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    let { data: row, error: selectError } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    if (selectError) console.error("profiles select failed:", selectError);
     if (!row) {
-      const { data: inserted } = await supabase.from("profiles").insert({ id: user.id }).select().maybeSingle();
+      const { data: inserted, error: insertError } = await supabase.from("profiles").insert({ id: user.id }).select().maybeSingle();
+      if (insertError) console.error("profiles insert failed:", insertError);
       row = inserted;
       if (!row) {
         // Insert can come back empty on a race (another device creating the same row at the same
         // moment) -- re-select once before giving up, instead of silently carrying on with no
         // row at all, which made every later save a no-op update against a row that never existed.
-        const { data: retried } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+        const { data: retried, error: retryError } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+        if (retryError) console.error("profiles re-select failed:", retryError);
         row = retried;
       }
     }
@@ -159,12 +162,15 @@ function useCloudProfile() {
 
   useEffect(() => { load(); }, []);
 
-  async function updateProfile(updates: any) {
+  async function updateProfile(updates: any): Promise<boolean> {
     setProfile((p: any) => ({ ...p, ...updates }));
     // upsert, not update: an UPDATE against a row that doesn't exist (e.g. the initial insert on
     // first login never landed) silently matches zero rows and "succeeds" without saving
     // anything -- the profile looked saved locally but came back empty on every next login.
-    if (userId) await supabase.from("profiles").upsert({ id: userId, ...updates });
+    if (!userId) { console.error("updateProfile: no userId yet, save skipped"); return false; }
+    const { error } = await supabase.from("profiles").upsert({ id: userId, ...updates });
+    if (error) { console.error("updateProfile failed:", error); return false; }
+    return true;
   }
 
   function visitDest(code: string) {
@@ -334,39 +340,31 @@ async function migrateLocalDataToCloud(userId: string, serverProfile: { name: st
   if (!serverProfile.name) {
     const old = readLocal<any>("wt_profile", null);
     if (old && old.name) {
-      try {
-        await supabase.from("profiles").upsert({ id: userId, name: old.name, role: old.role || "Cabin Crew", base: old.base || "AMS", bio: old.bio || "" });
-        wroteAnything = true;
-      } catch {}
+      const { error } = await supabase.from("profiles").upsert({ id: userId, name: old.name, role: old.role || "Cabin Crew", base: old.base || "AMS", bio: old.bio || "" });
+      if (error) console.error("migrate profile failed:", error); else wroteAnything = true;
     }
   }
 
   const oldFavorites = readLocal<string[]>("wt_favorites", []);
   if (oldFavorites.length) {
-    try {
-      await supabase.from("favorites").upsert(oldFavorites.map(key => ({ user_id: userId, tip_key: key })), { onConflict: "user_id,tip_key" });
-      wroteAnything = true;
-    } catch {}
+    const { error } = await supabase.from("favorites").upsert(oldFavorites.map(key => ({ user_id: userId, tip_key: key })), { onConflict: "user_id,tip_key" });
+    if (error) console.error("migrate favorites failed:", error); else wroteAnything = true;
   }
 
   const oldConnections = readLocal<string[]>("wt_connections", []);
   if (oldConnections.length) {
-    try {
-      await supabase.from("connections").upsert(oldConnections.map(name => ({ user_id: userId, crew_name: name })), { onConflict: "user_id,crew_name" });
-      wroteAnything = true;
-    } catch {}
+    const { error } = await supabase.from("connections").upsert(oldConnections.map(name => ({ user_id: userId, crew_name: name })), { onConflict: "user_id,crew_name" });
+    if (error) console.error("migrate connections failed:", error); else wroteAnything = true;
   }
 
   const oldRecent = readLocal<string[]>("wt_recent_destinations", []);
   const oldSeen = readLocal<string[]>("wt_favorites_seen", []);
   if (oldRecent.length || oldSeen.length) {
-    try {
-      const updates: any = { id: userId };
-      if (oldRecent.length) updates.recent_destinations = oldRecent;
-      if (oldSeen.length) updates.favorites_seen = oldSeen;
-      await supabase.from("profiles").upsert(updates);
-      wroteAnything = true;
-    } catch {}
+    const updates: any = { id: userId };
+    if (oldRecent.length) updates.recent_destinations = oldRecent;
+    if (oldSeen.length) updates.favorites_seen = oldSeen;
+    const { error } = await supabase.from("profiles").upsert(updates);
+    if (error) console.error("migrate recent/seen failed:", error); else wroteAnything = true;
   }
 
   const oldTips = readLocal<Record<string, any[]>>("wt_added_tips", {});
@@ -1682,6 +1680,8 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
   const [editing, setEditing] = useState(!profile.name);
   const [connSearch, setConnSearch] = useState("");
   const [draft, setDraft] = useState({ ...profile });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   const myTips = Object.entries(addedTips as Record<string, any[]>).flatMap(([code, tips]) =>
     tips.filter((t: any) => t.name === profile.name).map(t => ({ ...t, destCode: code, destCity: (DESTINATIONS as any)[code]?.city || code }))
@@ -1689,9 +1689,13 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
   const totalLikes = myTips.reduce((s, t) => s + (t.likes || 0), 0);
   const initials = profile.name ? profile.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() : "?";
 
-  function saveProfile() {
-    if (!draft.name.trim()) return;
-    updateProfile(draft);
+  async function saveProfile() {
+    if (!draft.name.trim() || saving) return;
+    setSaving(true);
+    setSaveError(false);
+    const ok = await updateProfile(draft);
+    setSaving(false);
+    if (!ok) { setSaveError(true); return; }
     setEditing(false);
   }
 
@@ -1729,7 +1733,8 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
             <label className="pef-label">Bio <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label>
             <textarea className="pef-input pef-textarea" value={draft.bio} onChange={(e: any) => setDraft((p: any) => ({ ...p, bio: e.target.value }))} placeholder="Short intro about yourself..." rows={3} />
           </div>
-          <button className="pef-save-btn" onClick={saveProfile} disabled={!draft.name.trim()}>Save profile</button>
+          {saveError && <p className="pef-error">Couldn't save your profile — check your connection and try again.</p>}
+          <button className="pef-save-btn" onClick={saveProfile} disabled={!draft.name.trim() || saving}>{saving ? "Saving…" : "Save profile"}</button>
         </div>
       ) : (
         <>
