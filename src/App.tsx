@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.4.1";
+const APP_VERSION = "1.4.2";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -162,15 +162,15 @@ function useCloudProfile() {
 
   useEffect(() => { load(); }, []);
 
-  async function updateProfile(updates: any): Promise<boolean> {
+  async function updateProfile(updates: any): Promise<{ ok: boolean; message?: string }> {
     setProfile((p: any) => ({ ...p, ...updates }));
     // upsert, not update: an UPDATE against a row that doesn't exist (e.g. the initial insert on
     // first login never landed) silently matches zero rows and "succeeds" without saving
     // anything -- the profile looked saved locally but came back empty on every next login.
-    if (!userId) { console.error("updateProfile: no userId yet, save skipped"); return false; }
+    if (!userId) { console.error("updateProfile: no userId yet, save skipped"); return { ok: false, message: "not signed in yet" }; }
     const { error } = await supabase.from("profiles").upsert({ id: userId, ...updates });
-    if (error) { console.error("updateProfile failed:", error); return false; }
-    return true;
+    if (error) { console.error("updateProfile failed:", error); return { ok: false, message: `${error.code || ""} ${error.message}`.trim() }; }
+    return { ok: true };
   }
 
   function visitDest(code: string) {
@@ -1681,7 +1681,7 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
   const [connSearch, setConnSearch] = useState("");
   const [draft, setDraft] = useState({ ...profile });
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const myTips = Object.entries(addedTips as Record<string, any[]>).flatMap(([code, tips]) =>
     tips.filter((t: any) => t.name === profile.name).map(t => ({ ...t, destCode: code, destCity: (DESTINATIONS as any)[code]?.city || code }))
@@ -1692,10 +1692,10 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
   async function saveProfile() {
     if (!draft.name.trim() || saving) return;
     setSaving(true);
-    setSaveError(false);
-    const ok = await updateProfile(draft);
+    setSaveError(null);
+    const result = await updateProfile(draft);
     setSaving(false);
-    if (!ok) { setSaveError(true); return; }
+    if (!result.ok) { setSaveError(result.message || "unknown error"); return; }
     setEditing(false);
   }
 
@@ -1733,7 +1733,7 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
             <label className="pef-label">Bio <span style={{color:"var(--text3)",fontWeight:400}}>(optional)</span></label>
             <textarea className="pef-input pef-textarea" value={draft.bio} onChange={(e: any) => setDraft((p: any) => ({ ...p, bio: e.target.value }))} placeholder="Short intro about yourself..." rows={3} />
           </div>
-          {saveError && <p className="pef-error">Couldn't save your profile — check your connection and try again.</p>}
+          {saveError && <p className="pef-error">Couldn't save your profile: {saveError}</p>}
           <button className="pef-save-btn" onClick={saveProfile} disabled={!draft.name.trim() || saving}>{saving ? "Saving…" : "Save profile"}</button>
         </div>
       ) : (
