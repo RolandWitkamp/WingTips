@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.8.2";
+const APP_VERSION = "1.9.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -144,6 +144,36 @@ function condenseOpeningHours(weekdayText: string[]): string {
   }).join(" · ");
 }
 
+function hhmmToMinutes(t: string): number {
+  return parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(2), 10);
+}
+// Google's structured opening_hours.periods carry real 24hr open/close times local to the place
+// -- used instead of parsing the free-text hours string, to flag "Jetlag Proof" places: ones
+// useful for crew landing at odd hours (opens before 7am) or needing a late meal (kitchen open at
+// or past 11pm, or open right through midnight).
+function jetlagProofFromGooglePeriods(periods: any[] | undefined): boolean {
+  if (!periods || !periods.length) return false;
+  return periods.some(p => {
+    if (!p.open) return false;
+    if (!p.close) return true; // no close time listed = open 24 hours
+    const open = hhmmToMinutes(p.open.time);
+    const close = hhmmToMinutes(p.close.time);
+    const spansMidnight = p.close.day !== p.open.day || close < open;
+    return open < 420 || close >= 1380 || spansMidnight;
+  });
+}
+// Best-effort equivalent for OSM-syntax opening_hours strings (e.g. "Mo-Su 06:00-02:00", "24/7")
+// when a tip came from Nominatim instead of Google and there's no structured periods to read.
+function jetlagProofFromOsmHours(osm: string | undefined): boolean {
+  if (!osm) return false;
+  if (/24\/7/.test(osm)) return true;
+  const times = [...osm.matchAll(/(\d{1,2}):(\d{2})/g)].map(m => parseInt(m[1], 10) * 60 + parseInt(m[2], 10));
+  for (let i = 0; i < times.length - 1; i += 2) {
+    const open = times[i], close = times[i + 1];
+    if (open < 420 || close >= 1380 || close < open) return true;
+  }
+  return false;
+}
 function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371;
   const dLat = (b.lat - a.lat) * Math.PI / 180;
@@ -342,6 +372,8 @@ function useRecommendations() {
       price: r.price || undefined,
       hours: r.hours || undefined,
       discount: r.discount === "true" ? true : (r.discount || undefined),
+      jetlagProof: r.jetlag_proof || undefined,
+      soloFriendly: r.solo_friendly || undefined,
       tags: r.tags || undefined,
       photo: r.photo || undefined,
       coords: r.coords || undefined,
@@ -374,6 +406,8 @@ function useRecommendations() {
       price: tipData.price || null,
       hours: tipData.hours || null,
       discount: tipData.discount === true ? "true" : (tipData.discount || null),
+      jetlag_proof: tipData.jetlagProof || false,
+      solo_friendly: tipData.soloFriendly || false,
       tags: tipData.tags || null,
       photo: tipData.photo || null,
       coords: tipData.coords || null,
@@ -385,6 +419,7 @@ function useRecommendations() {
       text: data.text, date: (data.created_at || "").slice(0, 10),
       price: data.price || undefined, hours: data.hours || undefined,
       discount: data.discount === "true" ? true : (data.discount || undefined),
+      jetlagProof: data.jetlag_proof || undefined, soloFriendly: data.solo_friendly || undefined,
       tags: data.tags || undefined, photo: data.photo || undefined, coords: data.coords || undefined,
       comments: [] as any[], likes: 0, likedByMe: false,
     };
@@ -469,6 +504,7 @@ async function migrateLocalDataToCloud(userId: string, serverProfile: { name: st
         author_name: t.name, author_role: t.role, text: t.text,
         price: t.price || null, hours: t.hours || null,
         discount: t.discount === true ? "true" : (t.discount || null),
+        jetlag_proof: t.jetlagProof || false, solo_friendly: t.soloFriendly || false,
         tags: t.tags || null, photo: t.photo || null, coords: t.coords || null,
         created_at: t.date ? new Date(t.date).toISOString() : new Date().toISOString(),
       });
@@ -1000,10 +1036,14 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
 
   const [sortBy, setSortBy] = useState<"recent" | "liked">("recent");
   const [filterRole, setFilterRole] = useState("all");
+  const [filterJetlag, setFilterJetlag] = useState(false);
+  const [filterSolo, setFilterSolo] = useState(false);
 
   const tipsForCat = crewTips
     .filter(t => t.category === activeCategory)
     .filter(t => filterRole === "all" || t.role === filterRole)
+    .filter(t => !filterJetlag || t.jetlagProof)
+    .filter(t => !filterSolo || t.soloFriendly)
     .slice()
     .sort((a, b) => sortBy === "liked"
       ? b.likes - a.likes
@@ -1155,6 +1195,10 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <option value="Cabin Crew">Cabin Crew</option>
           </select>
         </div>
+        <div className="sort-filter-bar crew-filter-bar">
+          <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}>🌙 Jetlag Proof</button>
+          <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}>🧍 Solo friendly</button>
+        </div>
         {tipsForCat.length === 0
           ? <div className="no-tips">No crew tips yet here. Be the first!</div>
           : tipsForCat.map(tip => {
@@ -1175,11 +1219,13 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 {tip.tags && tip.tags.length > 0 && (
                   <div className="tip-tags-row">{tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                {(tip.price || tip.hours || tip.discount || (tip.coords && hotelCoords)) && (
+                {(tip.price || tip.hours || tip.discount || tip.jetlagProof || tip.soloFriendly || (tip.coords && hotelCoords)) && (
                   <div className="tip-meta-row">
                     {tip.price && <span className="tip-price-badge">{tip.price === "Free" ? "Free" : tip.price}</span>}
                     {tip.hours && <span className="tip-hours-badge">🕐 {tip.hours}</span>}
                     {tip.discount && <span className="tip-discount-badge">✂️ {tip.discount === true ? "Crew discount" : `${tip.discount} crew`}</span>}
+                    {tip.jetlagProof && <span className="tip-jetlag-badge">🌙 Jetlag Proof</span>}
+                    {tip.soloFriendly && <span className="tip-solo-badge">🧍 Solo friendly</span>}
                     {tip.coords && hotelCoords && (
                       <span className="tip-distance-badge">🏨 {fmtDistance(distanceKm({ lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) }, hotelCoords))} from crew hotel</span>
                     )}
@@ -1306,6 +1352,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [openingHours, setOpeningHours] = useState("");
   const [crewDiscount, setCrewDiscount] = useState(false);
   const [discountPct, setDiscountPct] = useState("");
+  const [jetlagProof, setJetlagProof] = useState(false);
+  const [soloFriendly, setSoloFriendly] = useState(false);
   const [tags, setTags] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -1380,6 +1428,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
       setPlace(shortName);
       if (place_?.geometry?.location) setPlaceCoords({ lat: String(place_.geometry.location.lat()), lon: String(place_.geometry.location.lng()) });
       if (place_?.opening_hours?.weekday_text) setOpeningHours(condenseOpeningHours(place_.opening_hours.weekday_text));
+      setJetlagProof(jetlagProofFromGooglePeriods(place_?.opening_hours?.periods));
       return;
     }
     const shortName = s.namedetails?.name || s.name || s.display_name.split(",")[0];
@@ -1387,11 +1436,13 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     setPlaceCoords({ lat: s.lat, lon: s.lon });
     setCategory(osmCategoryGuess(s.class, s.type));
     setOpeningHours(s.extratags?.opening_hours || "");
+    setJetlagProof(jetlagProofFromOsmHours(s.extratags?.opening_hours));
   }
 
   function handlePlaceChange(e: any) {
     setPlace(e.target.value);
     setPlaceCoords(null);
+    setJetlagProof(false);
   }
 
   function handleSubmit() {
@@ -1410,6 +1461,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     if (openingHours.trim()) newTip.hours = openingHours.trim();
     if (placeCoords) newTip.coords = placeCoords;
     if (crewDiscount) newTip.discount = discountPct ? `${discountPct}%` : true;
+    if (jetlagProof) newTip.jetlagProof = true;
+    if (soloFriendly) newTip.soloFriendly = true;
     if (photo) newTip.photo = photo;
     const parsedTags = tags.split(/[\s,#]+/).map((t: string) => t.replace(/^#/, "").trim()).filter(Boolean);
     if (parsedTags.length > 0) newTip.tags = parsedTags;
@@ -1606,6 +1659,9 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           <label className="form-lbl">Opening hours <span className="form-lbl-hint">(auto-filled if available)</span></label>
           <input className="form-inp" placeholder="e.g. Mo-Fr 09:00-22:00, Sa-Su 10:00-23:00"
             value={openingHours} onChange={e => setOpeningHours(e.target.value)} />
+          {jetlagProof && (
+            <div className="jetlag-detected-badge">🌙 Jetlag Proof — detected from opening hours (opens early or stays open late)</div>
+          )}
         </div>
 
         <div className="form-group">
@@ -1634,6 +1690,19 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
               <span className="discount-hint">Leave blank if amount is unknown</span>
             </div>
           )}
+        </div>
+
+        <div className="form-group">
+          <div className="toggle-row">
+            <div>
+              <div className="form-lbl">Solo dining friendly</div>
+              <div className="toggle-sub">Good for crew eating alone — bar/counter seating, no awkward family tables</div>
+            </div>
+            <label className="toggle-switch">
+              <input type="checkbox" checked={soloFriendly} onChange={e => setSoloFriendly(e.target.checked)} />
+              <span className="toggle-track"><span className="toggle-thumb" /></span>
+            </label>
+          </div>
         </div>
 
         <div className="form-group">
@@ -2158,6 +2227,8 @@ function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips }) 
 // ─── CATEGORY FEED ─────────────────────────────────────────────────────────────
 function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipClick }) {
   const cat = CATEGORIES.find(c => c.id === category);
+  const [filterJetlag, setFilterJetlag] = useState(false);
+  const [filterSolo, setFilterSolo] = useState(false);
   const results: Array<{ tip: any; destCode: string; destCity: string }> = [];
   for (const dest of Object.values(DESTINATIONS) as any[]) {
     const allTips = [...(dest.crewTips || []), ...((addedTips[dest.code]) || [])];
@@ -2166,6 +2237,9 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
     }
   }
   results.sort((a, b) => (b.tip.date || "").localeCompare(a.tip.date || ""));
+  const filteredResults = results
+    .filter(r => !filterJetlag || r.tip.jetlagProof)
+    .filter(r => !filterSolo || r.tip.soloFriendly);
 
   return (
     <div className="screen">
@@ -2174,10 +2248,14 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
         <div className="screen-topbar-title">{cat?.icon} {cat?.label}</div>
       </div>
       <div className="content-pad">
-        <div className="search-results-meta">{results.length} recent tip{results.length !== 1 ? "s" : ""}, every destination mixed together</div>
-        {results.length === 0
-          ? <div className="no-tips">No {cat?.label.toLowerCase()} tips yet. Be the first to add one!</div>
-          : results.map((r, i) => (
+        <div className="search-results-meta">{filteredResults.length} recent tip{filteredResults.length !== 1 ? "s" : ""}, every destination mixed together</div>
+        <div className="sort-filter-bar crew-filter-bar">
+          <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}>🌙 Jetlag Proof</button>
+          <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}>🧍 Solo friendly</button>
+        </div>
+        {filteredResults.length === 0
+          ? <div className="no-tips">No {cat?.label.toLowerCase()} tips match yet. Try different filters.</div>
+          : filteredResults.map((r, i) => (
             <div key={i} className="search-result-item">
               <button className="search-result-dest" onClick={() => onDestClick(r.destCode)}>
                 {(DESTINATIONS as any)[r.destCode]?.flag} {r.destCity} · {r.destCode}
@@ -2194,6 +2272,12 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
                 <p className="crew-card-text">{r.tip.text}</p>
                 {r.tip.tags && r.tip.tags.length > 0 && (
                   <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
+                )}
+                {(r.tip.jetlagProof || r.tip.soloFriendly) && (
+                  <div className="tip-meta-row">
+                    {r.tip.jetlagProof && <span className="tip-jetlag-badge">🌙 Jetlag Proof</span>}
+                    {r.tip.soloFriendly && <span className="tip-solo-badge">🧍 Solo friendly</span>}
+                  </div>
                 )}
                 <div className="search-result-cta">View recommendation →</div>
               </button>

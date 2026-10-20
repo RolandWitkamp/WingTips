@@ -149,7 +149,10 @@
         .nav-avatar { width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; background:linear-gradient(135deg,#003082,#00A1DE); border:1.5px solid rgba(255,255,255,0.55); font-family:'Inter',sans-serif; }
         .notif-badge { position:absolute; top:-2px; right:-2px; width:16px; height:16px; background:#ef4444; border-radius:50%; font-size:9px; font-family:'Inter',sans-serif; font-weight:700; color:white; display:flex; align-items:center; justify-content:center; border:2px solid var(--bg); }
 
-        .bottom-nav { display:flex; border-top:1px solid rgba(0,161,222,0.25); background:#003082; backdrop-filter:blur(12px); position:sticky; bottom:0; z-index:50; }
+        /* z-index above every overlay (map-overlay:400, cat-menu-backdrop:200) -- the FAB pokes
+           up 14px above this bar's own top edge via its negative top offset, into the area the
+           overlays cover, so without this it got clipped by any open sheet. */
+        .bottom-nav { display:flex; border-top:1px solid rgba(0,161,222,0.25); background:#003082; backdrop-filter:blur(12px); position:sticky; bottom:0; z-index:600; }
         .bnav-item { flex:1; display:flex; flex-direction:column; align-items:center; padding:14px 0; gap:4px; background:none; border:none; cursor:pointer; font-size:12px; font-family:'Inter',sans-serif; font-weight:500; color:rgba(255,255,255,0.6); transition:color 0.15s; letter-spacing:0; }
         .bnav-item.active { color:#00A1DE; }
         .bnav-item:hover:not(:disabled) { color:rgba(255,255,255,0.85); }
@@ -339,7 +342,7 @@
            offset that iOS Safari kept rendering wrong. */
         .cat-menu-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.65); z-index:200; display:flex; align-items:flex-end; justify-content:center; animation:backdropIn 0.2s ease; }
         @keyframes backdropIn { from{opacity:0} to{opacity:1} }
-        .cat-menu-sheet { width:100%; max-width:480px; background:#FFFFFF; border-radius:20px 20px 0 0; border-top:1px solid var(--border); padding:12px 0 40px; animation:sheetUp 0.28s cubic-bezier(0.32,0.72,0,1); }
+        .cat-menu-sheet { width:100%; max-width:480px; max-height:85%; overflow-y:auto; background:#FFFFFF; border-radius:20px 20px 0 0; border-top:1px solid var(--border); padding:12px 0 40px; animation:sheetUp 0.28s cubic-bezier(0.32,0.72,0,1); }
         @keyframes sheetUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
         .cat-menu-handle { width:36px; height:4px; background:rgba(0,0,0,0.12); border-radius:2px; margin:0 auto 18px; }
         .cat-menu-title { font-family:'Inter',sans-serif; font-size:16px; font-weight:700; color:var(--text); padding:0 20px 4px; }
@@ -359,7 +362,12 @@
         .cat-menu-badge { font-size:10px; background:rgba(0,112,192,0.1); color:var(--accent); border-radius:10px; padding:2px 8px; }
         .cat-menu-tick { font-size:14px; color:var(--accent); }
 
-        .dest-sheet { height:88vh; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; }
+        /* Was a fixed 88vh, sized for when this sheet's backdrop covered the whole viewport.
+           Now the backdrop is only the area between the top and bottom nav, so a vh-based height
+           overshoots that box -- taller than its container, pushing past the top (no breathing
+           room above it) and past the bottom (behind the bottom nav / FAB). A share of the
+           container's own height stays correctly proportioned to it instead. */
+        .dest-sheet { height:85%; display:flex; flex-direction:column; overflow:hidden; padding-bottom:0; }
         .dest-continent-list { overflow-y:scroll; flex:1; min-height:0; padding:4px 12px 24px; display:flex; flex-direction:column; gap:4px; -webkit-overflow-scrolling:touch; scrollbar-width:thin; scrollbar-color:rgba(0,161,222,0.3) transparent; }
         .dest-continent-list::-webkit-scrollbar { width:4px; }
         .dest-continent-list::-webkit-scrollbar-thumb { background:rgba(0,161,222,0.3); border-radius:2px; }

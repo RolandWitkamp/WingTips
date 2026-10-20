@@ -83,11 +83,15 @@ create table if not exists recommendations (
   price text,
   hours text,
   discount text,
+  jetlag_proof boolean not null default false,
+  solo_friendly boolean not null default false,
   tags text[],
   photo text,
   coords jsonb,
   created_at timestamptz not null default now()
 );
+alter table recommendations add column if not exists jetlag_proof boolean not null default false;
+alter table recommendations add column if not exists solo_friendly boolean not null default false;
 alter table recommendations enable row level security;
 drop policy if exists "recommendations_select_all" on recommendations;
 create policy "recommendations_select_all" on recommendations for select using (auth.role() = 'authenticated');
