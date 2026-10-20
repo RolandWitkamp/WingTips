@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "0.15.2";
+const APP_VERSION = "0.16.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -597,6 +597,15 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     return () => { cancelled = true; };
   }, [code]);
 
+  function goToTip(tip: any) {
+    setShowMap(false);
+    setActiveCategory(tip.category);
+    setTimeout(() => {
+      const el = tipRefs.current[tip.id];
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+  }
+
   useEffect(() => {
     if (!showMap) return;
     const tipsWithCoords = crewTips.filter((t: any) => t.coords);
@@ -633,10 +642,15 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           map,
           icon: { path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#00A1DE", fillOpacity: 0.85, strokeColor: "#003082", strokeWeight: 2 }
         });
+        const viewBtnId = `map-view-tip-${tip.id}`;
         const infoWindow = new google.maps.InfoWindow({
-          content: `<strong>${tip.text.split("—")[0].replace("📍","").trim()}</strong><br/><span style="font-size:11px;color:#4A7C9E">${cat?.label || ""}</span>`
+          content: `<div style="min-width:150px"><strong>${tip.text.split("—")[0].replace("📍","").trim()}</strong><br/><span style="font-size:11px;color:#4A7C9E">${cat?.label || ""}</span><br/><button id="${viewBtnId}" style="margin-top:7px;background:#00A1DE;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-family:Inter,sans-serif;cursor:pointer;">View recommendation →</button></div>`
         });
         marker.addListener("click", () => infoWindow.open(map, marker));
+        infoWindow.addListener("domready", () => {
+          const btn = document.getElementById(viewBtnId);
+          if (btn) btn.onclick = () => { infoWindow.close(); goToTip(tip); };
+        });
       });
 
       if (hotelCenter) {
