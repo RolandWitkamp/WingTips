@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.5.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -62,7 +62,7 @@ function loadGoogleMaps(): Promise<boolean> {
         return;
       }
       const s = document.createElement("script"); s.id = "gmaps-js";
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places`;
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places&language=en`;
       s.onload = () => resolve(!!(window as any).google?.maps?.places);
       s.onerror = () => resolve(false);
       document.head.appendChild(s);
@@ -97,6 +97,28 @@ function googlePlaceDetails(placeId: string): Promise<any | null> {
       });
     } catch { resolve(null); }
   });
+}
+
+// Google's weekday_text is 7 full lines ("Monday: 12:00 – 4:00 PM, 5:00 – 10:15 PM", one per
+// day) -- joined as-is that's a wall of text. Collapse consecutive days that share the exact
+// same hours into a range ("Mon–Thu 12:00–4:00 PM, 5:00–10:15 PM · Fri 12:00–10:30 PM · ...")
+// so it reads as a normal short badge instead of a full weekly schedule dump.
+function condenseOpeningHours(weekdayText: string[]): string {
+  const parsed = weekdayText.map(line => {
+    const i = line.indexOf(":");
+    return { day: line.slice(0, i).trim(), hours: line.slice(i + 1).trim() };
+  });
+  const groups: { days: string[]; hours: string }[] = [];
+  for (const { day, hours } of parsed) {
+    const last = groups[groups.length - 1];
+    if (last && last.hours === hours) last.days.push(day);
+    else groups.push({ days: [day], hours });
+  }
+  const abbr = (d: string) => d.slice(0, 3);
+  return groups.map(g => {
+    const label = g.days.length <= 2 ? g.days.map(abbr).join(", ") : `${abbr(g.days[0])}–${abbr(g.days[g.days.length - 1])}`;
+    return `${label} ${g.hours}`;
+  }).join(" · ");
 }
 
 function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -1316,7 +1338,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
       const shortName = place_?.name || s.structured_formatting?.main_text || s.description || "";
       setPlace(shortName);
       if (place_?.geometry?.location) setPlaceCoords({ lat: String(place_.geometry.location.lat()), lon: String(place_.geometry.location.lng()) });
-      if (place_?.opening_hours?.weekday_text) setOpeningHours(place_.opening_hours.weekday_text.join("; "));
+      if (place_?.opening_hours?.weekday_text) setOpeningHours(condenseOpeningHours(place_.opening_hours.weekday_text));
       return;
     }
     const shortName = s.namedetails?.name || s.name || s.display_name.split(",")[0];
