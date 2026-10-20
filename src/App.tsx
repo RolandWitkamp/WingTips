@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.2.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -806,6 +806,11 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     }, 150);
   }
 
+  function zoomBy(delta: number) {
+    const map = mapInstanceRef.current;
+    if (map) map.setZoom((map.getZoom() || 14) + delta);
+  }
+
   useEffect(() => {
     if (!showMap) return;
     const tipsWithCoords = crewTips.filter((t: any) => t.coords);
@@ -832,7 +837,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
 
       const map = new google.maps.Map(mapContainerRef.current, {
         center: { lat, lng }, zoom,
-        mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: false, zoomControl: false,
       });
 
       tipsWithCoords.forEach((tip: any) => {
@@ -942,6 +947,10 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <div className="map-hint-banner">No pinned recommendations yet{dest.crewHotel ? " — showing the crew hotel" : ` — showing ${dest.city}`}. Add a tip with a place name to pin it here.</div>
           )}
           <div className="map-container" ref={mapContainerRef} />
+          <div className="map-zoom-controls">
+            <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1)}>+</button>
+            <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-1)}>−</button>
+          </div>
         </div>
       )}
       <div className="dest-hero">
