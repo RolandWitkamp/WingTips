@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.8.0";
+const APP_VERSION = "1.8.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -2482,6 +2482,7 @@ function AppContent() {
   const [selectedCrew, setSelectedCrew] = useState<{ name: string; role: string } | null>(null);
   const [showCatMenu, setShowCatMenu] = useState(false);
   const [showDestMenu, setShowDestMenu] = useState(false);
+  const topNavRef = useRef<HTMLDivElement | null>(null);
   const { notes: notifications, markAllRead } = useNotifications();
   const unreadCount = notifications.filter(n => !n.read).length;
   const {
@@ -2537,6 +2538,20 @@ function AppContent() {
 
   function handleAddTip(code, category) { setSelectedDest(code); setAddTipContext({ code, category }); setScreen("addrecommendation"); }
 
+  // The Categories/Explore sheet and the map overlay both need to stop short of the top nav
+  // instead of covering it -- a guessed pixel height (first try: 56px) came up a few pixels
+  // short of the real thing and still clipped it on an iPhone. Measuring the actual rendered
+  // height here and feeding it back in as a CSS variable is exact regardless of device/font
+  // rendering, and self-corrects if the nav's own content or padding ever changes.
+  useEffect(() => {
+    function measure() {
+      if (topNavRef.current) document.documentElement.style.setProperty("--topnav-h", `${topNavRef.current.offsetHeight}px`);
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [profileLoaded, recsLoaded]);
+
   if (!profileLoaded || !recsLoaded) {
     return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)",fontSize:24}}>✈</div></div>;
   }
@@ -2544,7 +2559,7 @@ function AppContent() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: "var(--text)", maxWidth: 480, margin: "0 auto", position: "relative" }}>
       {/* TOP NAV */}
-      <div className="top-nav">
+      <div className="top-nav" ref={topNavRef}>
         <button className="nav-title" onClick={() => { setScreen("home"); setShowCatMenu(false); setShowDestMenu(false); }}>WingTips</button>
         <div className="nav-right">
           <button className="nav-icon-btn" onClick={() => { setScreen("notifications"); setShowCatMenu(false); setShowDestMenu(false); }}>
