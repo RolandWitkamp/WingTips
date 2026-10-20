@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -134,6 +134,13 @@ function useCloudProfile() {
     if (!row) {
       const { data: inserted } = await supabase.from("profiles").insert({ id: user.id }).select().maybeSingle();
       row = inserted;
+      if (!row) {
+        // Insert can come back empty on a race (another device creating the same row at the same
+        // moment) -- re-select once before giving up, instead of silently carrying on with no
+        // row at all, which made every later save a no-op update against a row that never existed.
+        const { data: retried } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+        row = retried;
+      }
     }
     if (row) {
       setProfile({ name: row.name || "", role: row.role || "Cabin Crew", base: row.base || "AMS", bio: row.bio || "" });
@@ -154,13 +161,16 @@ function useCloudProfile() {
 
   async function updateProfile(updates: any) {
     setProfile((p: any) => ({ ...p, ...updates }));
-    if (userId) await supabase.from("profiles").update(updates).eq("id", userId);
+    // upsert, not update: an UPDATE against a row that doesn't exist (e.g. the initial insert on
+    // first login never landed) silently matches zero rows and "succeeds" without saving
+    // anything -- the profile looked saved locally but came back empty on every next login.
+    if (userId) await supabase.from("profiles").upsert({ id: userId, ...updates });
   }
 
   function visitDest(code: string) {
     setRecentDests((prev: string[]) => {
       const next = [code, ...prev.filter((c: string) => c !== code)].slice(0, 8);
-      if (userId) supabase.from("profiles").update({ recent_destinations: next }).eq("id", userId).then(() => {});
+      if (userId) supabase.from("profiles").upsert({ id: userId, recent_destinations: next }).then(() => {});
       return next;
     });
   }
@@ -175,7 +185,7 @@ function useCloudProfile() {
 
   function markFavoritesSeen() {
     setFavoritesSeen(favorites);
-    if (userId) supabase.from("profiles").update({ favorites_seen: favorites }).eq("id", userId).then(() => {});
+    if (userId) supabase.from("profiles").upsert({ id: userId, favorites_seen: favorites }).then(() => {});
   }
   const unseenFavorites = favorites.filter(k => !favoritesSeen.includes(k)).length;
 
@@ -325,7 +335,7 @@ async function migrateLocalDataToCloud(userId: string, serverProfile: { name: st
     const old = readLocal<any>("wt_profile", null);
     if (old && old.name) {
       try {
-        await supabase.from("profiles").update({ name: old.name, role: old.role || "Cabin Crew", base: old.base || "AMS", bio: old.bio || "" }).eq("id", userId);
+        await supabase.from("profiles").upsert({ id: userId, name: old.name, role: old.role || "Cabin Crew", base: old.base || "AMS", bio: old.bio || "" });
         wroteAnything = true;
       } catch {}
     }
@@ -351,10 +361,10 @@ async function migrateLocalDataToCloud(userId: string, serverProfile: { name: st
   const oldSeen = readLocal<string[]>("wt_favorites_seen", []);
   if (oldRecent.length || oldSeen.length) {
     try {
-      const updates: any = {};
+      const updates: any = { id: userId };
       if (oldRecent.length) updates.recent_destinations = oldRecent;
       if (oldSeen.length) updates.favorites_seen = oldSeen;
-      await supabase.from("profiles").update(updates).eq("id", userId);
+      await supabase.from("profiles").upsert(updates);
       wroteAnything = true;
     } catch {}
   }
@@ -823,20 +833,15 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       const hotelCenter = await geocodeHotel(dest.crewHotel, dest.city, dest.country);
       if (!mapContainerRef.current) return; // screen could have closed while awaiting
 
-      let lat = 52.3676, lng = 4.9041, zoom = 14;
-      if (tipsWithCoords.length > 0) {
-        lat = tipsWithCoords.reduce((s: number, t: any) => s + parseFloat(t.coords.lat), 0) / tipsWithCoords.length;
-        lng = tipsWithCoords.reduce((s: number, t: any) => s + parseFloat(t.coords.lon), 0) / tipsWithCoords.length;
-      } else if (hotelCenter) {
-        lat = hotelCenter.lat; lng = hotelCenter.lng; zoom = 14;
-      } else {
+      let lat = 52.3676, lng = 4.9041;
+      if (!hotelCenter && tipsWithCoords.length === 0) {
         const center = await geocodeCity(dest.city, dest.country);
-        if (center) { lat = center.lat; lng = center.lng; zoom = 12; }
+        if (center) { lat = center.lat; lng = center.lng; }
         if (!mapContainerRef.current) return; // screen could have closed while awaiting
       }
 
       const map = new google.maps.Map(mapContainerRef.current, {
-        center: { lat, lng }, zoom,
+        center: { lat, lng }, zoom: 12,
         mapTypeControl: false, streetViewControl: false, fullscreenControl: false, zoomControl: false,
       });
 
@@ -869,6 +874,17 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           content: `<strong>${dest.crewHotel.replace(/\s*\([^)]*\)\s*$/, "").trim()}</strong><br/><span style="font-size:11px;color:#4A7C9E">Crew hotel</span>`
         });
         hotelMarker.addListener("click", () => hotelInfo.open(map, hotelMarker));
+      }
+
+      const bounds = new google.maps.LatLngBounds();
+      let hasPoints = false;
+      if (hotelCenter) { bounds.extend(hotelCenter); hasPoints = true; }
+      tipsWithCoords.forEach((tip: any) => { bounds.extend({ lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) }); hasPoints = true; });
+      if (hasPoints) {
+        map.fitBounds(bounds, 48);
+        google.maps.event.addListenerOnce(map, "bounds_changed", () => {
+          if ((map.getZoom() || 0) > 15) map.setZoom(15);
+        });
       }
 
       mapInstanceRef.current = map;
