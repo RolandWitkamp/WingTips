@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.7.1";
+const APP_VERSION = "1.7.2";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -2547,11 +2547,11 @@ function AppContent() {
       <div className="top-nav">
         <div className="nav-title">WingTips</div>
         <div className="nav-right">
-          <button className="nav-icon-btn" onClick={() => setScreen("notifications")}>
+          <button className="nav-icon-btn" onClick={() => { setScreen("notifications"); setShowCatMenu(false); setShowDestMenu(false); }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             {unreadCount > 0 && <div className="notif-badge">{unreadCount}</div>}
           </button>
-          <button className="nav-icon-btn" aria-label="Profile" onClick={() => setScreen("profile")}>
+          <button className="nav-icon-btn" aria-label="Profile" onClick={() => { setScreen("profile"); setShowCatMenu(false); setShowDestMenu(false); }}>
             <div className="nav-avatar">{profile.name ? profile.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() : "?"}</div>
           </button>
           <button className="nav-icon-btn" aria-label="Log out" onClick={() => { if (confirm("Log out?")) supabase.auth.signOut(); }}>
@@ -2573,19 +2573,19 @@ function AppContent() {
 
       {/* BOTTOM NAV */}
       <div className="bottom-nav">
-        <button className={`bnav-item${screen === "home" ? " active" : ""}`} onClick={() => setScreen("home")}>
+        <button className={`bnav-item${screen === "home" ? " active" : ""}`} onClick={() => { setScreen("home"); setShowCatMenu(false); setShowDestMenu(false); }}>
           Home
         </button>
         <button className={`bnav-item${showDestMenu ? " active" : ""}`} onClick={() => { setShowDestMenu(v => !v); setShowCatMenu(false); }}>
           Explore
         </button>
         <div className="bnav-fab-wrap">
-          <button className="bnav-fab" onClick={() => { setAddTipContext({ code: null, category: null }); setScreen("addrecommendation"); }}>+</button>
+          <button className="bnav-fab" onClick={() => { setAddTipContext({ code: null, category: null }); setScreen("addrecommendation"); setShowCatMenu(false); setShowDestMenu(false); }}>+</button>
         </div>
         <button className={`bnav-item${showCatMenu || screen === "categoryfeed" ? " active" : ""}`} onClick={() => { setShowCatMenu(v => !v); setShowDestMenu(false); }}>
           Categories
         </button>
-        <button className={`bnav-item${screen === "favorites" ? " active" : ""}`} onClick={() => setScreen("favorites")}>
+        <button className={`bnav-item${screen === "favorites" ? " active" : ""}`} onClick={() => { setScreen("favorites"); setShowCatMenu(false); setShowDestMenu(false); }}>
           Saved {unseenFavorites > 0 && <span className="bnav-badge">{unseenFavorites}</span>}
         </button>
       </div>
