@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
         :root { --bg:#E8F2F9; --surface:#FFFFFF; --surface2:#D4E8F5; --border:rgba(0,161,222,0.22); --accent:#00A1DE; --text:#1A2A3A; --text2:#4A7C9E; --text3:#2C4A62; }
-        .tip-actions { display:flex; gap:8px; align-items:center; }
+        .tip-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
       .comment-toggle-btn { background:#F1F5F9; border:1px solid var(--border); border-radius:6px; padding:4px 10px; font-size:12px; color:var(--text2); cursor:pointer; font-family:'DM Mono',monospace; }
       .comment-toggle-btn:hover, .comment-toggle-btn.active { background:rgba(0,112,192,0.08); color:var(--accent); border-color:rgba(0,112,192,0.3); }
       .comments-section { margin-top:12px; border-top:1px solid var(--border); padding-top:12px; }
@@ -382,6 +382,9 @@ body {
   font-family: 'Inter', sans-serif;
   -webkit-font-smoothing: antialiased;
   margin: 0;
+  /* Backstop: no single element's own overflow should ever be able to widen the whole page and
+     force the iPhone viewport to zoom out to fit it -- it should clip or wrap instead. */
+  overflow-x: hidden;
 }
 
 .app-shell { min-height: 100vh; max-width: 480px; margin: 0 auto; background: var(--bg); display: flex; flex-direction: column; }
