@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.10.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -246,7 +246,6 @@ function useCloudProfile() {
   const [recentDests, setRecentDests] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favoritesSeen, setFavoritesSeen] = useState<string[]>([]);
-  const [connections, setConnections] = useState<string[]>([]);
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -274,12 +273,8 @@ function useCloudProfile() {
       setFavoritesSeen(row.favorites_seen || []);
     }
 
-    const [{ data: favRows }, { data: connRows }] = await Promise.all([
-      supabase.from("favorites").select("tip_key").eq("user_id", user.id),
-      supabase.from("connections").select("crew_name").eq("user_id", user.id),
-    ]);
+    const { data: favRows } = await supabase.from("favorites").select("tip_key").eq("user_id", user.id);
     setFavorites((favRows || []).map((r: any) => r.tip_key));
-    setConnections((connRows || []).map((r: any) => r.crew_name));
     setLoaded(true);
   }
 
@@ -318,21 +313,82 @@ function useCloudProfile() {
   }
   const unseenFavorites = favorites.filter(k => !favoritesSeen.includes(k)).length;
 
-  async function toggleConnection(name: string) {
-    if (!userId) return;
-    const has = connections.includes(name);
-    setConnections((prev: string[]) => has ? prev.filter((n: string) => n !== name) : [...prev, name]);
-    if (has) await supabase.from("connections").delete().eq("user_id", userId).eq("crew_name", name);
-    else await supabase.from("connections").insert({ user_id: userId, crew_name: name });
-  }
-
   return {
     loaded, userId, profile, updateProfile,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
-    connections, toggleConnection,
     reload: load,
   };
+}
+
+// Real crew-to-crew connections -- a request/accept relationship between two actual accounts
+// (connection_requests table: requester_id, addressee_id, status), replacing the old `connections`
+// table which just stored a free-typed name string with no link to a real account and no consent
+// from the other side. That old table is left in place but unused; there's no reliable way to
+// map its name strings onto real accounts, so existing "connections" need to be re-sent as real
+// requests. A request from someone who already has a pending request in from you is auto-accepted
+// instead of creating a second row, since that's just two people connecting at the same time.
+function useConnections(userId: string | null) {
+  const [loaded, setLoaded] = useState(false);
+  const [accepted, setAccepted] = useState<{ userId: string; name: string; role: string }[]>([]);
+  const [incoming, setIncoming] = useState<{ reqId: any; userId: string; name: string; role: string }[]>([]);
+  const [outgoing, setOutgoing] = useState<{ reqId: any; userId: string; name: string; role: string }[]>([]);
+
+  async function load() {
+    if (!userId) return;
+    const { data: reqRows, error } = await supabase.from("connection_requests").select("*")
+      .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+    if (error) { console.error("connection_requests load failed:", error); return; }
+    const rows = reqRows || [];
+    const otherIds = Array.from(new Set(rows.map((r: any) => r.requester_id === userId ? r.addressee_id : r.requester_id)));
+    const profilesById: Record<string, any> = {};
+    if (otherIds.length) {
+      const { data: profRows } = await supabase.from("profiles").select("id,name,role").in("id", otherIds);
+      for (const p of profRows || []) profilesById[p.id] = p;
+    }
+    const acc: any[] = [], inc: any[] = [], out: any[] = [];
+    for (const r of rows) {
+      const otherId = r.requester_id === userId ? r.addressee_id : r.requester_id;
+      const prof = profilesById[otherId];
+      const entry = { reqId: r.id, userId: otherId, name: prof?.name || "Crew member", role: prof?.role || "Cabin Crew" };
+      if (r.status === "accepted") acc.push(entry);
+      else if (r.addressee_id === userId) inc.push(entry);
+      else out.push(entry);
+    }
+    setAccepted(acc); setIncoming(inc); setOutgoing(out);
+    setLoaded(true);
+  }
+
+  useEffect(() => { load(); }, [userId]);
+
+  async function sendRequest(otherUserId: string) {
+    if (!userId || otherUserId === userId) return;
+    const already = incoming.find(r => r.userId === otherUserId);
+    if (already) { await acceptRequest(already.reqId); return; }
+    const { error } = await supabase.from("connection_requests").insert({ requester_id: userId, addressee_id: otherUserId });
+    if (error) { console.error("send connection request failed:", error); return; }
+    await load();
+  }
+  async function acceptRequest(reqId: any) {
+    const { error } = await supabase.from("connection_requests").update({ status: "accepted", responded_at: new Date().toISOString() }).eq("id", reqId);
+    if (error) { console.error("accept connection request failed:", error); return; }
+    await load();
+  }
+  async function declineRequest(reqId: any) {
+    const { error } = await supabase.from("connection_requests").delete().eq("id", reqId);
+    if (error) { console.error("decline/remove connection failed:", error); return; }
+    await load();
+  }
+  function relation(otherUserId: string | null | undefined): "self" | "none" | "outgoing" | "incoming" | "accepted" {
+    if (!otherUserId || !userId) return "none";
+    if (otherUserId === userId) return "self";
+    if (accepted.some(r => r.userId === otherUserId)) return "accepted";
+    if (incoming.some(r => r.userId === otherUserId)) return "incoming";
+    if (outgoing.some(r => r.userId === otherUserId)) return "outgoing";
+    return "none";
+  }
+
+  return { loaded, userId, accepted, incoming, outgoing, sendRequest, acceptRequest, declineRequest, relation, reload: load };
 }
 
 // Recommendations ("crew tips") used to be written only to this browser's localStorage, so no
@@ -365,6 +421,7 @@ function useRecommendations() {
       id: r.id,
       destCode: r.destination_code,
       category: r.category,
+      authorId: r.author_id,
       name: r.author_name,
       role: r.author_role,
       text: r.text,
@@ -374,6 +431,7 @@ function useRecommendations() {
       discount: r.discount === "true" ? true : (r.discount || undefined),
       jetlagProof: r.jetlag_proof || undefined,
       soloFriendly: r.solo_friendly || undefined,
+      visibility: r.visibility || "public",
       tags: r.tags || undefined,
       photo: r.photo || undefined,
       coords: r.coords || undefined,
@@ -408,6 +466,7 @@ function useRecommendations() {
       discount: tipData.discount === true ? "true" : (tipData.discount || null),
       jetlag_proof: tipData.jetlagProof || false,
       solo_friendly: tipData.soloFriendly || false,
+      visibility: tipData.visibility || "public",
       tags: tipData.tags || null,
       photo: tipData.photo || null,
       coords: tipData.coords || null,
@@ -415,11 +474,12 @@ function useRecommendations() {
     const { data, error } = await supabase.from("recommendations").insert(row).select().maybeSingle();
     if (error || !data) return null;
     const newTip = {
-      id: data.id, destCode, category: data.category, name: data.author_name, role: data.author_role,
+      id: data.id, destCode, category: data.category, authorId: data.author_id, name: data.author_name, role: data.author_role,
       text: data.text, date: (data.created_at || "").slice(0, 10),
       price: data.price || undefined, hours: data.hours || undefined,
       discount: data.discount === "true" ? true : (data.discount || undefined),
       jetlagProof: data.jetlag_proof || undefined, soloFriendly: data.solo_friendly || undefined,
+      visibility: data.visibility || "public",
       tags: data.tags || undefined, photo: data.photo || undefined, coords: data.coords || undefined,
       comments: [] as any[], likes: 0, likedByMe: false,
     };
@@ -479,11 +539,9 @@ async function migrateLocalDataToCloud(userId: string, serverProfile: { name: st
     if (error) console.error("migrate favorites failed:", error); else wroteAnything = true;
   }
 
-  const oldConnections = readLocal<string[]>("wt_connections", []);
-  if (oldConnections.length) {
-    const { error } = await supabase.from("connections").upsert(oldConnections.map(name => ({ user_id: userId, crew_name: name })), { onConflict: "user_id,crew_name" });
-    if (error) console.error("migrate connections failed:", error); else wroteAnything = true;
-  }
+  // No migration for old localStorage connections (wt_connections): those were just typed-in
+  // name strings with no link to a real account, so there's nothing reliable to map them onto in
+  // the new request/accept system -- anyone who had them will need to re-send a real request.
 
   const oldRecent = readLocal<string[]>("wt_recent_destinations", []);
   const oldSeen = readLocal<string[]>("wt_favorites_seen", []);
@@ -505,6 +563,7 @@ async function migrateLocalDataToCloud(userId: string, serverProfile: { name: st
         price: t.price || null, hours: t.hours || null,
         discount: t.discount === true ? "true" : (t.discount || null),
         jetlag_proof: t.jetlagProof || false, solo_friendly: t.soloFriendly || false,
+        visibility: t.visibility || "public",
         tags: t.tags || null, photo: t.photo || null, coords: t.coords || null,
         created_at: t.date ? new Date(t.date).toISOString() : new Date().toISOString(),
       });
@@ -912,7 +971,23 @@ function fmtTime(utcOffset: number) {
 }
 
 // ─── DESTINATION ───────────────────────────────────────────────────────────────
-function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, onToggleConnection, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment }) {
+// Shared connect/request/accept button for a tip card or a crew profile -- authorId is only
+// present on real Supabase-backed tips (see useRecommendations), never on the bundled editorial
+// crewTips seed data, so it renders nothing for those (there's no real account to connect to).
+function ConnectButton({ authorId, connections, className }: any) {
+  if (!authorId || !connections?.userId) return null;
+  const rel = connections.relation(authorId);
+  if (rel === "self") return null;
+  if (rel === "accepted") return <button className={`${className} connected`} disabled>✓ Connected</button>;
+  if (rel === "outgoing") return <button className={className} disabled>Pending</button>;
+  if (rel === "incoming") {
+    const req = connections.incoming.find((r: any) => r.userId === authorId);
+    return <button className={className} onClick={(e: any) => { e.stopPropagation(); req && connections.acceptRequest(req.reqId); }}>Accept request</button>;
+  }
+  return <button className={className} onClick={(e: any) => { e.stopPropagation(); connections.sendRequest(authorId); }}>+ Connect</button>;
+}
+
+function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment }) {
   const dest = DESTINATIONS[code];
   const liveWeather = useWeather(code, dest.city, dest.country);
   const [crewTips, setCrewTips] = useState(
@@ -1207,9 +1282,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             return (
               <div key={tip.id} ref={(el: any) => { tipRefs.current[tip.id] = el; }} className={`crew-card${String(tip.id) === String(focusTipId) ? " crew-card-focused" : ""}`}>
                 <div className="crew-card-top">
-                  <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: tip.name, role: tip.role })}>{tip.name[0]}</button>
+                  <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: tip.name, role: tip.role, authorId: tip.authorId })}>{tip.name[0]}</button>
                   <div>
-                    <div className="crew-card-name crew-card-name-link" onClick={() => onCrewClick && onCrewClick({ name: tip.name, role: tip.role })}>{tip.name}</div>
+                    <div className="crew-card-name crew-card-name-link" onClick={() => onCrewClick && onCrewClick({ name: tip.name, role: tip.role, authorId: tip.authorId })}>{tip.name}</div>
                     <div className="crew-card-role">{tip.role}</div>
                   </div>
                   <div className="crew-card-date">{tip.date}</div>
@@ -1219,13 +1294,14 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 {tip.tags && tip.tags.length > 0 && (
                   <div className="tip-tags-row">{tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                {(tip.price || tip.hours || tip.discount || tip.jetlagProof || tip.soloFriendly || (tip.coords && hotelCoords)) && (
+                {(tip.price || tip.hours || tip.discount || tip.jetlagProof || tip.soloFriendly || tip.visibility === "connections" || (tip.coords && hotelCoords)) && (
                   <div className="tip-meta-row">
                     {tip.price && <span className="tip-price-badge">{tip.price === "Free" ? "Free" : tip.price}</span>}
                     {tip.hours && <span className="tip-hours-badge">🕐 {tip.hours}</span>}
                     {tip.discount && <span className="tip-discount-badge">✂️ {tip.discount === true ? "Crew discount" : `${tip.discount} crew`}</span>}
                     {tip.jetlagProof && <span className="tip-jetlag-badge">🌙 Jetlag Proof</span>}
                     {tip.soloFriendly && <span className="tip-solo-badge">🧍 Solo friendly</span>}
+                    {tip.visibility === "connections" && <span className="tip-private-badge">🔒 Connections only</span>}
                     {tip.coords && hotelCoords && (
                       <span className="tip-distance-badge">🏨 {fmtDistance(distanceKm({ lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) }, hotelCoords))} from crew hotel</span>
                     )}
@@ -1242,11 +1318,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                     onClick={() => setExpandedTip(isExpanded ? null : tip.id)}>
                     💬 {tip.comments.length > 0 ? tip.comments.length : "Comment"}
                   </button>
-                  <button
-                    className={`connect-btn${connections.includes(tip.name) ? " connected" : ""}`}
-                    onClick={() => onToggleConnection(tip.name)}>
-                    {connections.includes(tip.name) ? "✓ Connected" : "+ Connect"}
-                  </button>
+                  <ConnectButton authorId={tip.authorId} connections={connections} className="connect-btn" />
                   <button
                     className={`fav-btn${favorites.includes(`${code}-${tip.id}`) ? " saved" : ""}`}
                     onClick={() => onToggleFavorite(`${code}-${tip.id}`)}>
@@ -1354,6 +1426,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [discountPct, setDiscountPct] = useState("");
   const [jetlagProof, setJetlagProof] = useState(false);
   const [soloFriendly, setSoloFriendly] = useState(false);
+  const [visibility, setVisibility] = useState<"public" | "connections">("public");
   const [tags, setTags] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -1463,6 +1536,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     if (crewDiscount) newTip.discount = discountPct ? `${discountPct}%` : true;
     if (jetlagProof) newTip.jetlagProof = true;
     if (soloFriendly) newTip.soloFriendly = true;
+    newTip.visibility = visibility;
     if (photo) newTip.photo = photo;
     const parsedTags = tags.split(/[\s,#]+/).map((t: string) => t.replace(/^#/, "").trim()).filter(Boolean);
     if (parsedTags.length > 0) newTip.tags = parsedTags;
@@ -1706,6 +1780,14 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <div className="form-group">
+          <label className="form-lbl">Who can see this tip?</label>
+          <div className="price-chip-row">
+            <button className={`price-chip${visibility === "public" ? " active" : ""}`} onClick={() => setVisibility("public")}>🌍 Public — everyone</button>
+            <button className={`price-chip${visibility === "connections" ? " active" : ""}`} onClick={() => setVisibility("connections")}>🔒 Connections only</button>
+          </div>
+        </div>
+
+        <div className="form-group">
           <label className="form-lbl">Category</label>
           <div className="rec-cat-row">
             {CATEGORIES.map(c => (
@@ -1913,7 +1995,7 @@ function AccountSection() {
 }
 
 // ─── PROFILE ───────────────────────────────────────────────────────────────────
-function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, profile, updateProfile, onCrewClick }) {
+function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile, onCrewClick }) {
   const [tab, setTab] = useState("tips");
   const [editing, setEditing] = useState(!profile.name);
   const [connSearch, setConnSearch] = useState("");
@@ -1986,7 +2068,7 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
             {[
               [String(myTips.length), "Tips Posted"],
               [String(totalLikes), "Likes Received"],
-              [String(connections.length), "Connections"],
+              [String(connections.accepted.length), "Connections"],
             ].map(([v, l]) => (
               <div key={l} className="stat-box"><div className="stat-val">{v}</div><div className="stat-lbl">{l}</div></div>
             ))}
@@ -1994,7 +2076,8 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
           <div className="profile-tabs">
             <button className={`profile-tab${tab === "tips" ? " active" : ""}`} onClick={() => setTab("tips")}>My Tips</button>
             <button className={`profile-tab${tab === "connections" ? " active" : ""}`} onClick={() => setTab("connections")}>
-              Connections {connections.length > 0 && <span className="tab-badge">{connections.length}</span>}
+              Connections {connections.accepted.length > 0 && <span className="tab-badge">{connections.accepted.length}</span>}
+              {connections.incoming.length > 0 && <span className="tab-badge tab-badge-alert">{connections.incoming.length}</span>}
             </button>
             <button className={`profile-tab${tab === "account" ? " active" : ""}`} onClick={() => setTab("account")}>Account</button>
           </div>
@@ -2015,7 +2098,23 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
             )}
             {tab === "connections" && (
               <>
-                {connections.length > 0 && (
+                {connections.incoming.length > 0 && (
+                  <div className="conn-requests-block">
+                    <div className="conn-requests-label">Connection requests</div>
+                    {connections.incoming.map((r: any) => (
+                      <div key={r.reqId} className="connection-card">
+                        <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
+                        <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
+                          <div className="crew-card-name crew-card-name-link">{r.name}</div>
+                          <div className="crew-card-role">{r.role}</div>
+                        </div>
+                        <button className="disconnect-btn" onClick={() => connections.declineRequest(r.reqId)}>Decline</button>
+                        <button className="pef-save-btn conn-accept-btn" onClick={() => connections.acceptRequest(r.reqId)}>Accept</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {connections.accepted.length > 0 && (
                   <input
                     className="conn-search-input"
                     placeholder="Search connections..."
@@ -2023,21 +2122,36 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
                     onChange={(e: any) => setConnSearch(e.target.value)}
                   />
                 )}
-                {connections.length === 0
+                {connections.accepted.length === 0 && connections.outgoing.length === 0 && connections.incoming.length === 0
                   ? <div className="no-tips">No connections yet — tap Connect on a crew tip to add someone.</div>
-                  : connections
-                      .filter((name: string) => name.toLowerCase().includes(connSearch.toLowerCase()))
-                      .map((name: string) => (
-                        <div key={name} className="connection-card">
-                          <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name, role: "Crew member" })}>{name[0]}</button>
-                          <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name, role: "Crew member" })}>
-                            <div className="crew-card-name crew-card-name-link">{name}</div>
-                            <div className="crew-card-role">Crew member</div>
+                  : connections.accepted
+                      .filter((r: any) => r.name.toLowerCase().includes(connSearch.toLowerCase()))
+                      .map((r: any) => (
+                        <div key={r.reqId} className="connection-card">
+                          <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
+                          <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
+                            <div className="crew-card-name crew-card-name-link">{r.name}</div>
+                            <div className="crew-card-role">{r.role}</div>
                           </div>
-                          <button className="disconnect-btn" onClick={() => onToggleConnection(name)}>Remove</button>
+                          <button className="disconnect-btn" onClick={() => connections.declineRequest(r.reqId)}>Remove</button>
                         </div>
                       ))
                 }
+                {connections.outgoing.length > 0 && (
+                  <>
+                    <div className="conn-requests-label" style={{marginTop:18}}>Pending — waiting for them to accept</div>
+                    {connections.outgoing.map((r: any) => (
+                      <div key={r.reqId} className="connection-card">
+                        <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
+                        <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
+                          <div className="crew-card-name crew-card-name-link">{r.name}</div>
+                          <div className="crew-card-role">{r.role}</div>
+                        </div>
+                        <button className="disconnect-btn" onClick={() => connections.declineRequest(r.reqId)}>Cancel</button>
+                      </div>
+                    ))}
+                  </>
+                )}
               </>
             )}
             {tab === "account" && <AccountSection />}
@@ -2050,8 +2164,7 @@ function ProfileScreen({ onBack, connections, onToggleConnection, addedTips, pro
 }
 
 // ─── DESTINATIONS MENU ────────────────────────────────────────────────────────
-function CrewProfileScreen({ crew, onBack, connections, onToggleConnection, addedTips }) {
-  const isConnected = connections.includes(crew.name);
+function CrewProfileScreen({ crew, onBack, connections, addedTips }) {
   const allTips = [
     ...Object.values(DESTINATIONS as any).flatMap((dest: any) =>
       (dest.crewTips || []).filter((t: any) => t.name === crew.name).map((t: any) => ({ ...t, destCity: dest.city, destFlag: dest.flag }))
@@ -2072,9 +2185,7 @@ function CrewProfileScreen({ crew, onBack, connections, onToggleConnection, adde
         <div className="profile-av profile-av-large">{initials}</div>
         <div className="profile-name">{crew.name}</div>
         <div className="profile-role">{crew.role}</div>
-        <button className={`crew-connect-btn${isConnected ? " connected" : ""}`} onClick={() => onToggleConnection(crew.name)}>
-          {isConnected ? "✓ Connected" : "+ Connect"}
-        </button>
+        <ConnectButton authorId={crew.authorId} connections={connections} className="crew-connect-btn" />
       </div>
       <div className="stats-row">
         {[[String(allTips.length), "Tips Posted"], [String(totalLikes), "Likes Received"]].map(([v, l]) => (
@@ -2273,10 +2384,11 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
                 {r.tip.tags && r.tip.tags.length > 0 && (
                   <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                {(r.tip.jetlagProof || r.tip.soloFriendly) && (
+                {(r.tip.jetlagProof || r.tip.soloFriendly || r.tip.visibility === "connections") && (
                   <div className="tip-meta-row">
                     {r.tip.jetlagProof && <span className="tip-jetlag-badge">🌙 Jetlag Proof</span>}
                     {r.tip.soloFriendly && <span className="tip-solo-badge">🧍 Solo friendly</span>}
+                    {r.tip.visibility === "connections" && <span className="tip-private-badge">🔒 Connections only</span>}
                   </div>
                 )}
                 <div className="search-result-cta">View recommendation →</div>
@@ -2563,7 +2675,7 @@ function AppContent() {
   const [addTipContext, setAddTipContext] = useState({ code: null, category: null });
   const [activeCategory, setActiveCategory] = useState("food");
   const [focusTipId, setFocusTipId] = useState<string | number | null>(null);
-  const [selectedCrew, setSelectedCrew] = useState<{ name: string; role: string } | null>(null);
+  const [selectedCrew, setSelectedCrew] = useState<{ name: string; role: string; authorId?: string } | null>(null);
   const [showCatMenu, setShowCatMenu] = useState(false);
   const [showDestMenu, setShowDestMenu] = useState(false);
   const topNavRef = useRef<HTMLDivElement | null>(null);
@@ -2573,9 +2685,9 @@ function AppContent() {
     loaded: profileLoaded, userId, profile, updateProfile,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
-    connections, toggleConnection,
     reload: reloadProfile,
   } = useCloudProfile();
+  const connections = useConnections(userId);
   const { byDest: addedTips, loaded: recsLoaded, addRecommendation, toggleLike, addComment, reload: reloadRecs } = useRecommendations();
 
   useEffect(() => {
@@ -2665,14 +2777,14 @@ function AppContent() {
           by .screen -- instead of position:fixed with a guessed/measured viewport offset. */}
       <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
-        {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} onToggleConnection={toggleConnection} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} />}
+        {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} />}
         {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
         {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
         {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} />}
-        {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
-        {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} onToggleConnection={toggleConnection} addedTips={addedTips} />}
+        {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
+        {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} addedTips={addedTips} />}
 
         {/* DESTINATIONS SLIDE-UP MENU */}
         {showDestMenu && (

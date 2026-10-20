@@ -25,10 +25,13 @@
       .connect-btn { margin-left:auto; background:rgba(0,161,222,0.1); border:1px solid rgba(0,161,222,0.35); border-radius:6px; padding:4px 10px; font-size:11px; color:var(--accent); cursor:pointer; white-space:nowrap; transition:all 0.15s; }
       .connect-btn:hover { background:rgba(0,161,222,0.2); }
       .connect-btn.connected { background:rgba(0,112,192,0.12); border-color:rgba(0,112,192,0.4); color:var(--accent); }
+      .connect-btn:disabled, .crew-connect-btn:disabled { opacity:0.55; cursor:default; }
+      .tip-private-badge { background:rgba(100,116,139,0.1); border:1px solid rgba(100,116,139,0.3); border-radius:10px; padding:2px 10px; font-size:12px; color:#475569; font-weight:600; font-family:'Inter',sans-serif; }
       .profile-tabs { display:flex; border-bottom:1px solid var(--border); }
       .profile-tab { flex:1; padding:12px; background:none; border:none; font-family:'Inter',sans-serif; font-size:13px; font-weight:500; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:6px; }
       .profile-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
       .tab-badge { background:var(--accent); color:white; border-radius:10px; padding:1px 7px; font-size:10px; font-weight:700; }
+      .tab-badge-alert { background:#EF4444; color:white; border-radius:10px; padding:1px 7px; font-size:10px; font-weight:700; }
       .account-section { display:flex; flex-direction:column; gap:20px; padding-top:4px; }
       .account-email { font-size:13px; color:var(--text2); }
       .account-email strong { color:var(--text); }
@@ -45,8 +48,11 @@
       .account-delete-btn:not(:disabled):hover { background:#B91C1C; }
       .connection-card { display:flex; align-items:center; gap:12px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
       .connection-info { flex:1; }
-      .disconnect-btn { background:none; border:1px solid var(--border); border-radius:6px; padding:5px 10px; font-size:11px; color:var(--text2); cursor:pointer; }
+      .disconnect-btn { background:none; border:1px solid var(--border); border-radius:6px; padding:5px 10px; font-size:11px; color:var(--text2); cursor:pointer; flex-shrink:0; }
       .disconnect-btn:hover { border-color:rgba(239,68,68,0.4); color:#DC2626; }
+      .conn-requests-block { margin-bottom:20px; }
+      .conn-requests-label { font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--text2); margin-bottom:10px; font-weight:600; }
+      .conn-accept-btn { width:auto; max-width:none; padding:7px 16px; font-size:12px; border-radius:6px; flex-shrink:0; }
       .fav-btn { background:none; border:none; padding:4px 6px; font-size:16px; color:var(--text2); cursor:pointer; line-height:1; transition:color 0.15s; }
       .fav-btn:hover { color:#f59e0b; }
       .fav-btn.saved { color:#f59e0b; }

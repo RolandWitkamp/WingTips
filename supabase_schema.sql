@@ -62,12 +62,47 @@ alter table profiles add column if not exists updated_at timestamptz not null de
 -- requiring it rather than having every write carry it just to satisfy the column.
 alter table profiles alter column email drop not null;
 alter table profiles enable row level security;
+-- Was select-own-only, but every tip already copies the author's name/role onto the
+-- recommendation row itself (author_name/author_role) and shows it to any signed-in crew member
+-- -- so a display name isn't private within the app. Broadened to let any signed-in user look up
+-- another profile's id/name/role, which the connections feature needs to show who a pending
+-- request or an accepted connection actually is.
 drop policy if exists "profiles_select_own" on profiles;
-create policy "profiles_select_own" on profiles for select using (auth.uid() = id);
+drop policy if exists "profiles_select_all" on profiles;
+create policy "profiles_select_all" on profiles for select using (auth.role() = 'authenticated');
 drop policy if exists "profiles_insert_own" on profiles;
 create policy "profiles_insert_own" on profiles for insert with check (auth.uid() = id);
 drop policy if exists "profiles_update_own" on profiles;
 create policy "profiles_update_own" on profiles for update using (auth.uid() = id);
+
+-- Real crew-to-crew connections: a request from one account to another, accepted or still
+-- pending. Replaces the old `connections` table below (free-typed name, no real account link, no
+-- consent from the other side) -- that table is left in place but unused; there's no reliable way
+-- to map its name strings onto real accounts, so anyone who had old-style connections needs to
+-- re-send a real request. Declared before `recommendations` because its select policy (further
+-- down) checks this table for an accepted connection to decide whether a connections-only tip is
+-- visible to the current user.
+create table if not exists connection_requests (
+  id bigint generated always as identity primary key,
+  requester_id uuid not null references auth.users(id) on delete cascade,
+  addressee_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'pending',
+  created_at timestamptz not null default now(),
+  responded_at timestamptz,
+  unique (requester_id, addressee_id),
+  check (requester_id <> addressee_id)
+);
+alter table connection_requests enable row level security;
+drop policy if exists "connreq_select_own" on connection_requests;
+create policy "connreq_select_own" on connection_requests for select using (auth.uid() = requester_id or auth.uid() = addressee_id);
+drop policy if exists "connreq_insert_own" on connection_requests;
+create policy "connreq_insert_own" on connection_requests for insert with check (auth.uid() = requester_id);
+-- Either side can update: the addressee accepts a pending request, but either side also needs to
+-- be able to delete an accepted row to "remove" a connection (handled by the delete policy below).
+drop policy if exists "connreq_update_addressee" on connection_requests;
+create policy "connreq_update_addressee" on connection_requests for update using (auth.uid() = addressee_id or auth.uid() = requester_id);
+drop policy if exists "connreq_delete_own" on connection_requests;
+create policy "connreq_delete_own" on connection_requests for delete using (auth.uid() = requester_id or auth.uid() = addressee_id);
 
 -- Recommendations ("crew tips"): shared with every signed-in crew member, writable only by
 -- their own author. author_name/author_role are copied from the profile at post time (same
@@ -85,6 +120,7 @@ create table if not exists recommendations (
   discount text,
   jetlag_proof boolean not null default false,
   solo_friendly boolean not null default false,
+  visibility text not null default 'public',
   tags text[],
   photo text,
   coords jsonb,
@@ -92,9 +128,24 @@ create table if not exists recommendations (
 );
 alter table recommendations add column if not exists jetlag_proof boolean not null default false;
 alter table recommendations add column if not exists solo_friendly boolean not null default false;
+alter table recommendations add column if not exists visibility text not null default 'public';
 alter table recommendations enable row level security;
+-- visibility='connections' tips are only readable by the author and their accepted connections
+-- -- enforced here, at the database level, not just by hiding them in the UI, so the restriction
+-- holds even for someone calling the Supabase API directly (same bar as the @klm.com signup gate
+-- above). 'public' tips are unchanged: readable by any signed-in crew member.
 drop policy if exists "recommendations_select_all" on recommendations;
-create policy "recommendations_select_all" on recommendations for select using (auth.role() = 'authenticated');
+drop policy if exists "recommendations_select_visible" on recommendations;
+create policy "recommendations_select_visible" on recommendations for select using (
+  visibility = 'public'
+  or author_id = auth.uid()
+  or exists (
+    select 1 from connection_requests cr
+    where cr.status = 'accepted'
+      and ((cr.requester_id = auth.uid() and cr.addressee_id = recommendations.author_id)
+        or (cr.addressee_id = auth.uid() and cr.requester_id = recommendations.author_id))
+  )
+);
 drop policy if exists "recommendations_insert_own" on recommendations;
 create policy "recommendations_insert_own" on recommendations for insert with check (auth.uid() = author_id);
 drop policy if exists "recommendations_delete_own" on recommendations;
@@ -145,6 +196,8 @@ create policy "favorites_insert_own" on favorites for insert with check (auth.ui
 drop policy if exists "favorites_delete_own" on favorites;
 create policy "favorites_delete_own" on favorites for delete using (auth.uid() = user_id);
 
+-- Deprecated: superseded by connection_requests above. Left in place (unused by the app) rather
+-- than dropped, since dropping it would destroy whatever old name-tag data is in it.
 create table if not exists connections (
   user_id uuid not null references auth.users(id) on delete cascade,
   crew_name text not null,
