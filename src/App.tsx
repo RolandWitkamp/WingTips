@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.4.2";
+const APP_VERSION = "1.5.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -49,6 +49,54 @@ async function geocodeHotel(crewHotel: string, city: string, country: string): P
     }
   } catch {}
   return null;
+}
+
+let gmapsLoading: Promise<boolean> | null = null;
+function loadGoogleMaps(): Promise<boolean> {
+  if ((window as any).google?.maps?.places) return Promise.resolve(true);
+  if (gmapsLoading) return gmapsLoading;
+  gmapsLoading = new Promise(resolve => {
+    try {
+      if (document.getElementById("gmaps-js")) {
+        const iv = setInterval(() => { if ((window as any).google?.maps?.places) { clearInterval(iv); resolve(true); } }, 100);
+        return;
+      }
+      const s = document.createElement("script"); s.id = "gmaps-js";
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places`;
+      s.onload = () => resolve(!!(window as any).google?.maps?.places);
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    } catch { resolve(false); }
+  });
+  return gmapsLoading;
+}
+let acService: any = null, placesService: any = null;
+function ensurePlacesServices(): boolean {
+  const google = (window as any).google;
+  if (!google?.maps?.places) return false;
+  try {
+    if (!acService) acService = new google.maps.places.AutocompleteService();
+    if (!placesService) placesService = new google.maps.places.PlacesService(document.createElement("div"));
+    return true;
+  } catch { return false; }
+}
+function googlePlacePredictions(query: string, destCity: string): Promise<any[]> {
+  return new Promise(resolve => {
+    try {
+      acService.getPlacePredictions({ input: `${query}, ${destCity}` }, (preds: any, status: string) => {
+        resolve(status === "OK" && preds ? preds : []);
+      });
+    } catch { resolve([]); }
+  });
+}
+function googlePlaceDetails(placeId: string): Promise<any | null> {
+  return new Promise(resolve => {
+    try {
+      placesService.getDetails({ placeId, fields: ["name", "formatted_address", "geometry", "opening_hours"] }, (place: any, status: string) => {
+        resolve(status === "OK" ? place : null);
+      });
+    } catch { resolve(null); }
+  });
 }
 
 function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -888,13 +936,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       mapInstanceRef.current = map;
     };
 
-    if ((window as any).google?.maps) { setTimeout(initMap, 50); return; }
-    if (!document.getElementById("gmaps-js")) {
-      const s = document.createElement("script"); s.id = "gmaps-js";
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}`;
-      s.onload = () => setTimeout(initMap, 50);
-      document.head.appendChild(s);
-    } else { const iv = setInterval(() => { if ((window as any).google?.maps) { clearInterval(iv); initMap(); } }, 100); }
+    loadGoogleMaps().then(() => setTimeout(initMap, 50));
   }, [showMap]);
 
   useEffect(() => {
@@ -1183,6 +1225,15 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [destCode, setDestCode] = useState(selectedDest || "");
   const [showDestPicker, setShowDestPicker] = useState(false);
   const [openContinent, setOpenContinent] = useState<string | null>(null);
+  const [destQuery, setDestQuery] = useState("");
+  const destSearchQ = destQuery.trim().toLowerCase();
+  const destSearchResults = destSearchQ.length === 0 ? null : allDests
+    .filter(d => d.city.toLowerCase().includes(destSearchQ) || d.country.toLowerCase().includes(destSearchQ) || d.code.toLowerCase() === destSearchQ)
+    .sort((a, b) => {
+      const aStarts = a.city.toLowerCase().startsWith(destSearchQ) ? 0 : 1;
+      const bStarts = b.city.toLowerCase().startsWith(destSearchQ) ? 0 : 1;
+      return aStarts - bStarts || a.city.localeCompare(b.city);
+    });
   const [place, setPlace] = useState("");
   const [category, setCategory] = useState(defaultCategory || "food");
   const [note, setNote] = useState("");
@@ -1201,6 +1252,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [pendingTip, setPendingTip] = useState<any>(null);
   const [donationAmount, setDonationAmount] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggSource, setSuggSource] = useState<"google" | "nominatim">("nominatim");
   const [loadingSugg, setLoadingSugg] = useState(false);
   const [placeCoords, setPlaceCoords] = useState<{ lat: string; lon: string } | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -1230,9 +1282,23 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     const timer = setTimeout(async () => {
       setLoadingSugg(true);
       try {
+        // Google Places has far more reliable opening-hours data than OSM for most businesses
+        // (spas, restaurants, ...) -- try it first, fall back to Nominatim if it's unavailable or
+        // comes up empty, same two-tier approach used for hotel search in Pillow Report.
+        if (await loadGoogleMaps() && ensurePlacesServices()) {
+          const preds = await googlePlacePredictions(place, dest.city);
+          if (place.length >= 3 && preds.length) {
+            setSuggSource("google");
+            setSuggestions(preds);
+            setShowDropdown(true);
+            setLoadingSugg(false);
+            return;
+          }
+        }
         const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place + " " + dest.city)}&format=json&limit=6&addressdetails=1&extratags=1&namedetails=1`;
         const res = await fetch(url, { headers: { "Accept-Language": "en" } });
         const data = await res.json();
+        setSuggSource("nominatim");
         setSuggestions(data);
         setShowDropdown(data.length > 0);
       } catch { setSuggestions([]); }
@@ -1241,15 +1307,23 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     return () => clearTimeout(timer);
   }, [place, destCode]);
 
-  function pickSuggestion(s: any) {
+  async function pickSuggestion(s: any) {
     justPickedRef.current = true;
+    setSuggestions([]);
+    setShowDropdown(false);
+    if (suggSource === "google") {
+      const place_ = await googlePlaceDetails(s.place_id);
+      const shortName = place_?.name || s.structured_formatting?.main_text || s.description || "";
+      setPlace(shortName);
+      if (place_?.geometry?.location) setPlaceCoords({ lat: String(place_.geometry.location.lat()), lon: String(place_.geometry.location.lng()) });
+      if (place_?.opening_hours?.weekday_text) setOpeningHours(place_.opening_hours.weekday_text.join("; "));
+      return;
+    }
     const shortName = s.namedetails?.name || s.name || s.display_name.split(",")[0];
     setPlace(shortName);
     setPlaceCoords({ lat: s.lat, lon: s.lon });
     setCategory(osmCategoryGuess(s.class, s.type));
     setOpeningHours(s.extratags?.opening_hours || "");
-    setSuggestions([]);
-    setShowDropdown(false);
   }
 
   function handlePlaceChange(e: any) {
@@ -1346,6 +1420,33 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
               <div className="cat-menu-handle" />
               <div className="cat-menu-title">Select destination</div>
               <div className="cat-menu-dest">{allDests.length} destinations · grouped by continent &amp; country</div>
+              <div className="dest-search-row">
+                <input className="dest-search-inp" placeholder="Search city, country or code…"
+                  value={destQuery} onChange={e => setDestQuery(e.target.value)} autoComplete="off" />
+                {destQuery && <button type="button" className="dest-search-clear" onClick={() => setDestQuery("")}>✕</button>}
+              </div>
+              {destSearchResults && (
+                <div className="dest-continent-list">
+                  {destSearchResults.length === 0
+                    ? <div className="no-tips" style={{ padding: "0 16px" }}>No destinations match "{destQuery}".</div>
+                    : <div className="dest-list-inner">
+                        {destSearchResults.map((d: any) => (
+                          <button key={d.code} type="button"
+                            className={`dest-list-item${destCode === d.code ? " active" : ""}`}
+                            onClick={() => { setDestCode(d.code); setPlace(""); setPlaceCoords(null); setSuggestions([]); setShowDestPicker(false); setDestQuery(""); }}>
+                            <div className="dli-text">
+                              <span className="dli-city">{d.flag} {d.city}</span>
+                              <span className="dli-sub">{d.country}</span>
+                            </div>
+                            <span className="dli-code">{d.code}</span>
+                            {destCode === d.code && <span className="dli-tick">✓</span>}
+                          </button>
+                        ))}
+                      </div>
+                  }
+                </div>
+              )}
+              {!destSearchResults && (
               <div className="dest-continent-list">
                 {destsByContinentCountry.map(group => {
                   const isOpen = openContinent === group.continent;
@@ -1385,6 +1486,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
                   );
                 })}
               </div>
+              )}
             </div>
           </div>
         )}
@@ -1407,8 +1509,12 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           {showDropdown && suggestions.length > 0 && (
             <div className="sugg-dropdown">
               {suggestions.map((s, i) => {
-                const primary = s.namedetails?.name || s.name || s.display_name.split(",")[0];
-                const addr = s.display_name.split(",").slice(1, 3).join(",").trim();
+                const primary = suggSource === "google"
+                  ? (s.structured_formatting?.main_text || s.description)
+                  : (s.namedetails?.name || s.name || s.display_name.split(",")[0]);
+                const addr = suggSource === "google"
+                  ? (s.structured_formatting?.secondary_text || "")
+                  : s.display_name.split(",").slice(1, 3).join(",").trim();
                 return (
                   <button key={i} className="sugg-item" onMouseDown={() => pickSuggestion(s)}>
                     <span className="sugg-primary">{primary}</span>

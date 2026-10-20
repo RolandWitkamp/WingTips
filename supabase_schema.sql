@@ -39,15 +39,28 @@ grant execute on function delete_own_account() to authenticated;
 -- destinations they've visited, which saved tips they've already seen) that doesn't
 -- warrant its own table.
 create table if not exists profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  name text not null default '',
-  role text not null default 'Cabin Crew',
-  base text not null default 'AMS',
-  bio text not null default '',
-  recent_destinations text[] not null default '{}',
-  favorites_seen text[] not null default '{}',
-  updated_at timestamptz not null default now()
+  id uuid primary key references auth.users(id) on delete cascade
 );
+-- create table if not exists is a no-op when the table already exists, so if `profiles` was
+-- created earlier (even just as a bare id column) with a since-updated version of this file,
+-- the columns added later here never actually landed -- hence "PGRST204: could not find the
+-- 'base' column" even though this script had "succeeded" every time it was run. Each column is
+-- added individually and idempotently so the table is always brought up to the current shape
+-- regardless of how or when it was first created.
+alter table profiles add column if not exists name text not null default '';
+alter table profiles add column if not exists role text not null default 'Cabin Crew';
+alter table profiles add column if not exists base text not null default 'AMS';
+alter table profiles add column if not exists bio text not null default '';
+alter table profiles add column if not exists recent_destinations text[] not null default '{}';
+alter table profiles add column if not exists favorites_seen text[] not null default '{}';
+alter table profiles add column if not exists updated_at timestamptz not null default now();
+-- This table turned out to predate this file, left over from an earlier approval-gated design
+-- (approved/rejected/is_admin, same pattern as Pillow Report) that WingTips doesn't use -- those
+-- three columns all have a false default so they don't block anything, but email is required with
+-- no default, which rejected every insert that didn't set it. Not used by the app for anything
+-- (crew tips show the display name, not the login email), so the simplest fix is to stop
+-- requiring it rather than having every write carry it just to satisfy the column.
+alter table profiles alter column email drop not null;
 alter table profiles enable row level security;
 drop policy if exists "profiles_select_own" on profiles;
 create policy "profiles_select_own" on profiles for select using (auth.uid() = id);
