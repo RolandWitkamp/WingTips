@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.5.1";
+const APP_VERSION = "1.6.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -690,16 +690,16 @@ function groupDestsByContinentCountry(dests: any[]) {
 }
 
 const CATEGORIES = [
-  { id: "food",          label: "Food & Drink",    icon: "🍽️" },
-  { id: "fitness",       label: "Fitness",         icon: "🏋️" },
-  { id: "beauty",        label: "Beauty",          icon: "💅" },
-  { id: "wellness",      label: "Wellness & Spa",  icon: "🧘" },
-  { id: "shopping",      label: "Shopping",        icon: "🛍️" },
-  { id: "nightlife",     label: "Nightlife",       icon: "🍸" },
-  { id: "accommodation", label: "Accommodation",   icon: "🏨" },
-  { id: "working",       label: "Working",         icon: "💻" },
-  { id: "gems",          label: "Hidden Gems",     icon: "💎" },
-  { id: "other",         label: "Other",           icon: "📌" },
+  { id: "food",          label: "Food & Drink",    icon: "🍽️", color: "#F97316" },
+  { id: "fitness",       label: "Fitness",         icon: "🏋️", color: "#22C55E" },
+  { id: "beauty",        label: "Beauty",          icon: "💅", color: "#EC4899" },
+  { id: "wellness",      label: "Wellness & Spa",  icon: "🧘", color: "#14B8A6" },
+  { id: "shopping",      label: "Shopping",        icon: "🛍️", color: "#A855F7" },
+  { id: "nightlife",     label: "Nightlife",       icon: "🍸", color: "#6366F1" },
+  { id: "accommodation", label: "Accommodation",   icon: "🏨", color: "#0EA5E9" },
+  { id: "working",       label: "Working",         icon: "💻", color: "#64748B" },
+  { id: "gems",          label: "Hidden Gems",     icon: "💎", color: "#D946EF" },
+  { id: "other",         label: "Other",           icon: "📌", color: "#78716C" },
 ];
 
 const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boolean; destCode: string; category?: string; tipId?: number }> = [];
@@ -918,7 +918,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         const marker = new google.maps.Marker({
           position: { lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) },
           map,
-          icon: { path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#00A1DE", fillOpacity: 0.85, strokeColor: "#003082", strokeWeight: 2 }
+          icon: { path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: cat?.color || "#00A1DE", fillOpacity: 0.9, strokeColor: "#fff", strokeWeight: 2 }
         });
         const viewBtnId = `map-view-tip-${tip.id}`;
         const infoWindow = new google.maps.InfoWindow({
@@ -1041,6 +1041,24 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1)}>+</button>
             <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-1)}>−</button>
           </div>
+          {(() => {
+            const presentIds = Array.from(new Set(crewTips.filter((t: any) => t.coords).map((t: any) => t.category)));
+            if (presentIds.length === 0) return null;
+            return (
+              <div className="map-legend">
+                {presentIds.map(id => {
+                  const cat = CATEGORIES.find(c => c.id === id);
+                  if (!cat) return null;
+                  return (
+                    <div key={id} className="map-legend-item">
+                      <span className="map-legend-dot" style={{ background: cat.color }} />
+                      {cat.label}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
       <div className="dest-hero">

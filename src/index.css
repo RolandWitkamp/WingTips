@@ -224,6 +224,9 @@
         .map-zoom-controls button { width:40px; height:40px; background:#fff; border:none; border-bottom:1px solid var(--border); color:var(--text); font-size:20px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1; }
         .map-zoom-controls button:last-child { border-bottom:none; }
         .map-zoom-controls button:active { background:var(--surface2); }
+        .map-legend { position:absolute; left:12px; bottom:16px; max-width:58%; background:rgba(255,255,255,0.95); border-radius:10px; padding:8px 10px; box-shadow:0 2px 10px rgba(0,0,0,0.2); z-index:5; display:flex; flex-direction:column; gap:5px; }
+        .map-legend-item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text); font-family:'Inter',sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .map-legend-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
         .map-no-coords { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; padding:40px; font-size:13px; color:var(--text2); line-height:1.7; }
         .map-hint-banner { flex-shrink:0; background:rgba(0,161,222,0.08); border-bottom:1px solid var(--border); padding:10px 20px; text-align:center; font-size:12px; color:var(--text2); line-height:1.5; }
         .crew-hotel-bar { display:flex; align-items:center; gap:10px; padding:12px 20px; background:rgba(0,112,192,0.06); border-bottom:1px solid rgba(0,112,192,0.15); font-size:12px; color:var(--accent); }
