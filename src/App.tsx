@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -125,36 +125,32 @@ function useCloudProfile() {
   const [favoritesSeen, setFavoritesSeen] = useState<string[]>([]);
   const [connections, setConnections] = useState<string[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || cancelled) return;
-      setUserId(user.id);
+  async function load() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setUserId(user.id);
 
-      let { data: row } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
-      if (!row) {
-        const { data: inserted } = await supabase.from("profiles").insert({ id: user.id }).select().maybeSingle();
-        row = inserted;
-      }
-      if (row && !cancelled) {
-        setProfile({ name: row.name || "", role: row.role || "Cabin Crew", base: row.base || "AMS", bio: row.bio || "" });
-        setRecentDests(row.recent_destinations || []);
-        setFavoritesSeen(row.favorites_seen || []);
-      }
+    let { data: row } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    if (!row) {
+      const { data: inserted } = await supabase.from("profiles").insert({ id: user.id }).select().maybeSingle();
+      row = inserted;
+    }
+    if (row) {
+      setProfile({ name: row.name || "", role: row.role || "Cabin Crew", base: row.base || "AMS", bio: row.bio || "" });
+      setRecentDests(row.recent_destinations || []);
+      setFavoritesSeen(row.favorites_seen || []);
+    }
 
-      const [{ data: favRows }, { data: connRows }] = await Promise.all([
-        supabase.from("favorites").select("tip_key").eq("user_id", user.id),
-        supabase.from("connections").select("crew_name").eq("user_id", user.id),
-      ]);
-      if (!cancelled) {
-        setFavorites((favRows || []).map((r: any) => r.tip_key));
-        setConnections((connRows || []).map((r: any) => r.crew_name));
-        setLoaded(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    const [{ data: favRows }, { data: connRows }] = await Promise.all([
+      supabase.from("favorites").select("tip_key").eq("user_id", user.id),
+      supabase.from("connections").select("crew_name").eq("user_id", user.id),
+    ]);
+    setFavorites((favRows || []).map((r: any) => r.tip_key));
+    setConnections((connRows || []).map((r: any) => r.crew_name));
+    setLoaded(true);
+  }
+
+  useEffect(() => { load(); }, []);
 
   async function updateProfile(updates: any) {
     setProfile((p: any) => ({ ...p, ...updates }));
@@ -192,10 +188,11 @@ function useCloudProfile() {
   }
 
   return {
-    loaded, profile, updateProfile,
+    loaded, userId, profile, updateProfile,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
     connections, toggleConnection,
+    reload: load,
   };
 }
 
@@ -309,7 +306,78 @@ function useRecommendations() {
     setRecs(prev => prev.map(r => r.id === tipId ? { ...r, comments: [...r.comments, newComment] } : r));
   }
 
-  return { byDest, loaded, addRecommendation, toggleLike, addComment };
+  return { byDest, loaded, addRecommendation, toggleLike, addComment, reload };
+}
+
+// One-time import: everyone who used the app before cross-device sync shipped has real data
+// sitting in this browser's localStorage (profile, favorites, connections, the recommendations
+// they added) that the new Supabase tables never saw -- a fresh account there looks empty even
+// though "everything is on the server" from here on. Runs once per browser (wt_migrated_to_cloud
+// flag), only fills in what the server doesn't already have, and never overwrites real server
+// data with stale local data.
+async function migrateLocalDataToCloud(userId: string, serverProfile: { name: string }): Promise<boolean> {
+  let wroteAnything = false;
+  function readLocal<T>(key: string, fallback: T): T {
+    try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch { return fallback; }
+  }
+
+  if (!serverProfile.name) {
+    const old = readLocal<any>("wt_profile", null);
+    if (old && old.name) {
+      try {
+        await supabase.from("profiles").update({ name: old.name, role: old.role || "Cabin Crew", base: old.base || "AMS", bio: old.bio || "" }).eq("id", userId);
+        wroteAnything = true;
+      } catch {}
+    }
+  }
+
+  const oldFavorites = readLocal<string[]>("wt_favorites", []);
+  if (oldFavorites.length) {
+    try {
+      await supabase.from("favorites").upsert(oldFavorites.map(key => ({ user_id: userId, tip_key: key })), { onConflict: "user_id,tip_key" });
+      wroteAnything = true;
+    } catch {}
+  }
+
+  const oldConnections = readLocal<string[]>("wt_connections", []);
+  if (oldConnections.length) {
+    try {
+      await supabase.from("connections").upsert(oldConnections.map(name => ({ user_id: userId, crew_name: name })), { onConflict: "user_id,crew_name" });
+      wroteAnything = true;
+    } catch {}
+  }
+
+  const oldRecent = readLocal<string[]>("wt_recent_destinations", []);
+  const oldSeen = readLocal<string[]>("wt_favorites_seen", []);
+  if (oldRecent.length || oldSeen.length) {
+    try {
+      const updates: any = {};
+      if (oldRecent.length) updates.recent_destinations = oldRecent;
+      if (oldSeen.length) updates.favorites_seen = oldSeen;
+      await supabase.from("profiles").update(updates).eq("id", userId);
+      wroteAnything = true;
+    } catch {}
+  }
+
+  const oldTips = readLocal<Record<string, any[]>>("wt_added_tips", {});
+  const rows: any[] = [];
+  for (const [code, tips] of Object.entries(oldTips)) {
+    for (const t of tips) {
+      rows.push({
+        destination_code: code, category: t.category, author_id: userId,
+        author_name: t.name, author_role: t.role, text: t.text,
+        price: t.price || null, hours: t.hours || null,
+        discount: t.discount === true ? "true" : (t.discount || null),
+        tags: t.tags || null, photo: t.photo || null, coords: t.coords || null,
+        created_at: t.date ? new Date(t.date).toISOString() : new Date().toISOString(),
+      });
+    }
+  }
+  if (rows.length) {
+    try { await supabase.from("recommendations").insert(rows); wroteAnything = true; } catch {}
+  }
+
+  return wroteAnything;
 }
 
 const DESTINATIONS = {
@@ -2212,12 +2280,23 @@ function AppContent() {
   const { notes: notifications, markAllRead } = useNotifications();
   const unreadCount = notifications.filter(n => !n.read).length;
   const {
-    loaded: profileLoaded, profile, updateProfile,
+    loaded: profileLoaded, userId, profile, updateProfile,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
     connections, toggleConnection,
+    reload: reloadProfile,
   } = useCloudProfile();
-  const { byDest: addedTips, loaded: recsLoaded, addRecommendation, toggleLike, addComment } = useRecommendations();
+  const { byDest: addedTips, loaded: recsLoaded, addRecommendation, toggleLike, addComment, reload: reloadRecs } = useRecommendations();
+
+  useEffect(() => {
+    if (!profileLoaded || !recsLoaded || !userId) return;
+    if (localStorage.getItem("wt_migrated_to_cloud")) return;
+    (async () => {
+      const migrated = await migrateLocalDataToCloud(userId, profile);
+      localStorage.setItem("wt_migrated_to_cloud", "1");
+      if (migrated) { await Promise.all([reloadProfile(), reloadRecs()]); }
+    })();
+  }, [profileLoaded, recsLoaded, userId]);
 
   useEffect(() => {
     if (screen === "dest" && selectedDest) visitDest(selectedDest);
