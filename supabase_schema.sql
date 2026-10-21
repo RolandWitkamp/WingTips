@@ -4,11 +4,27 @@
 -- enforcement: anyone calling the Supabase API directly, bypassing the app's own JS check,
 -- gets rejected here too.
 
+-- Every accepted signup is logged here so the app owner can see new sign-ups in-app (Notifications
+-- screen, bell icon) -- there's no manual approval step (any @klm.com address can self-register
+-- and use the app immediately once they confirm their email), this is purely a heads-up, not a
+-- gate. Only readable by the owner's own account (matched by email, not a role/admin column --
+-- there's exactly one owner); written only by handle_new_user below, which runs as security
+-- definer so it can insert here regardless of who's signing up.
+create table if not exists admin_signup_log (
+  id bigint generated always as identity primary key,
+  email text not null,
+  created_at timestamptz not null default now()
+);
+alter table admin_signup_log enable row level security;
+drop policy if exists "admin_signup_log_select_owner" on admin_signup_log;
+create policy "admin_signup_log_select_owner" on admin_signup_log for select using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');
+
 create or replace function handle_new_user() returns trigger as $$
 begin
   if new.email !~* '@klm\.com$' then
     raise exception 'Only @klm.com e-mail addresses can create an account.';
   end if;
+  insert into admin_signup_log (email) values (new.email);
   return new;
 end; $$ language plpgsql security definer;
 

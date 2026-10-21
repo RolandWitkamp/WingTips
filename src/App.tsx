@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.10.0";
+const APP_VERSION = "1.11.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -242,6 +242,7 @@ function useWeather(code: string, city: string, country: string) {
 function useCloudProfile() {
   const [loaded, setLoaded] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [profile, setProfile] = useState({ name: "", role: "Cabin Crew", base: "AMS", bio: "" });
   const [recentDests, setRecentDests] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -251,6 +252,7 @@ function useCloudProfile() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     setUserId(user.id);
+    setUserEmail(user.email || null);
 
     let { data: row, error: selectError } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
     if (selectError) console.error("profiles select failed:", selectError);
@@ -314,11 +316,41 @@ function useCloudProfile() {
   const unseenFavorites = favorites.filter(k => !favoritesSeen.includes(k)).length;
 
   return {
-    loaded, userId, profile, updateProfile,
+    loaded, userId, userEmail, profile, updateProfile,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
     reload: load,
   };
+}
+
+// Heads-up for the app owner when someone new signs up -- not an approval gate (there isn't one),
+// just a notification. Reads admin_signup_log, which handle_new_user() (see supabase_schema.sql)
+// writes to for every accepted signup; RLS on that table only returns rows to the owner's own
+// account, so isAdmin here is really just "does the server actually hand me any rows", the email
+// check is only to avoid firing the query for every other user.
+const ADMIN_EMAIL = "roland.witkamp@klm.com";
+function useAdminSignups(userEmail: string | null) {
+  const isAdmin = (userEmail || "").toLowerCase() === ADMIN_EMAIL;
+  const [events, setEvents] = useState<{ id: number; email: string; created_at: string }[]>([]);
+  const [lastSeenId, setLastSeenId] = useState<number>(() => {
+    try { return Number(localStorage.getItem("wt_admin_signups_seen") || 0); } catch { return 0; }
+  });
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    supabase.from("admin_signup_log").select("*").order("created_at", { ascending: false }).limit(50)
+      .then(({ data, error }) => { if (error) console.error("admin_signup_log load failed:", error); else setEvents(data || []); });
+  }, [isAdmin]);
+
+  const unseenCount = isAdmin ? events.filter(e => e.id > lastSeenId).length : 0;
+  function markSeen() {
+    if (!events.length) return;
+    const maxId = Math.max(...events.map(e => e.id));
+    setLastSeenId(maxId);
+    try { localStorage.setItem("wt_admin_signups_seen", String(maxId)); } catch {}
+  }
+
+  return { isAdmin, events, unseenCount, lastSeenId, markSeen };
 }
 
 // Real crew-to-crew connections -- a request/accept relationship between two actual accounts
@@ -1906,16 +1938,30 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, add
 }
 
 // ─── NOTIFICATIONS ─────────────────────────────────────────────────────────────
-function NotificationsScreen({ onBack, notes, onMarkAllRead, onNotificationClick }) {
+function NotificationsScreen({ onBack, notes, onMarkAllRead, adminSignups, onNotificationClick }) {
+  const showAdminBlock = adminSignups?.isAdmin && adminSignups.events.length > 0;
   return (
     <div className="screen">
       <div className="screen-topbar">
         <button className="back-btn-flat" onClick={onBack}>← Back</button>
         <div className="screen-topbar-title">Notifications</div>
-        {notes.length > 0 && <button className="mark-read-btn" onClick={onMarkAllRead}>Mark all read</button>}
+        {(notes.length > 0 || showAdminBlock) && (
+          <button className="mark-read-btn" onClick={() => { onMarkAllRead(); adminSignups?.markSeen?.(); }}>Mark all read</button>
+        )}
       </div>
       <div className="content-pad">
-        {notes.length === 0
+        {showAdminBlock && (
+          <div className="conn-requests-block">
+            <div className="conn-requests-label">🆕 New sign-ups</div>
+            {adminSignups.events.map((e: any) => (
+              <div key={e.id} className={`my-tip-card${e.id > adminSignups.lastSeenId ? " signup-unread" : ""}`}>
+                <div className="my-tip-meta">{new Date(e.created_at).toLocaleString()}</div>
+                <p className="my-tip-text">{e.email} created an account</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {notes.length === 0 && !showAdminBlock
           ? <div className="no-tips">No notifications yet.</div>
           : notes.map(n => (
             <button key={n.id} className={`notif-item${n.read ? "" : " unread"}`} onClick={() => n.destCode && onNotificationClick(n)} disabled={!n.destCode}>
@@ -2680,13 +2726,14 @@ function AppContent() {
   const [showDestMenu, setShowDestMenu] = useState(false);
   const topNavRef = useRef<HTMLDivElement | null>(null);
   const { notes: notifications, markAllRead } = useNotifications();
-  const unreadCount = notifications.filter(n => !n.read).length;
   const {
-    loaded: profileLoaded, userId, profile, updateProfile,
+    loaded: profileLoaded, userId, userEmail, profile, updateProfile,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
     reload: reloadProfile,
   } = useCloudProfile();
+  const adminSignups = useAdminSignups(userEmail);
+  const unreadCount = notifications.filter(n => !n.read).length + adminSignups.unseenCount;
   const connections = useConnections(userId);
   const { byDest: addedTips, loaded: recsLoaded, addRecommendation, toggleLike, addComment, reload: reloadRecs } = useRecommendations();
 
@@ -2781,7 +2828,7 @@ function AppContent() {
         {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
         {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
-        {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
+        {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
         {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} />}
         {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
         {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} addedTips={addedTips} />}
