@@ -404,6 +404,11 @@
         .dest-list-item.no-flag { padding-left:16px; }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Mobile Safari sometimes auto-boosts font size based on its own column-width heuristics, which
+   kick in differently depending on the device's screen width -- same CSS px value can render
+   visibly larger or smaller on a bigger iPhone than a smaller one. Locks every font-size to
+   exactly what's declared, regardless of device. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   background: #003082;
   font-family: 'Inter', sans-serif;
