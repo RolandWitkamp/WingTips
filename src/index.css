@@ -98,6 +98,9 @@
       .tip-hours-badge { background:rgba(0,112,192,0.08); border:1px solid rgba(0,112,192,0.2); border-radius:10px; padding:2px 10px; font-size:12px; color:var(--accent); font-family:'Inter',sans-serif; }
       .tip-discount-badge { background:rgba(5,150,105,0.08); border:1px solid rgba(5,150,105,0.25); border-radius:10px; padding:2px 10px; font-size:12px; color:#065F46; font-weight:600; font-family:'Inter',sans-serif; }
       .tip-distance-badge { background:rgba(74,124,158,0.08); border:1px solid rgba(74,124,158,0.25); border-radius:10px; padding:2px 10px; font-size:12px; color:var(--text2); font-family:'Inter',sans-serif; }
+      .tip-jetlag-badge { background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:10px; padding:2px 10px; font-size:12px; color:#4338CA; font-weight:600; font-family:'Inter',sans-serif; }
+      .tip-solo-badge { background:rgba(20,184,166,0.08); border:1px solid rgba(20,184,166,0.25); border-radius:10px; padding:2px 10px; font-size:12px; color:#0F766E; font-weight:600; font-family:'Inter',sans-serif; }
+      .tip-quickbite-badge { background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:2px 10px; font-size:12px; color:#92400E; font-weight:600; font-family:'Inter',sans-serif; }
       .maps-hint { font-size:11px; color:var(--text2); margin-top:5px; }
       .photo-upload-btn { display:inline-flex; align-items:center; cursor:pointer; background:#F8FAFC; border:1px dashed #CBD5E1; border-radius:10px; padding:10px 16px; font-size:13px; color:var(--text2); transition:background 0.15s; }
       .photo-upload-btn:hover { background:#F1F5F9; }
@@ -321,7 +324,7 @@
         .success-sub { font-size:13px; color:var(--text2); line-height:1.6; }
 
         .screen-topbar { display:flex; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border); }
-        .screen-topbar-title { font-family:'Inter',sans-serif; font-weight:700; font-size:16px; flex:1; }
+        .screen-topbar-title { font-family:'Inter',sans-serif; font-weight:700; font-size:16px; flex:1; display:flex; align-items:center; gap:8px; }
         .mark-read-btn { background:none; border:none; font-family:'DM Mono',monospace; font-size:11px; color:var(--accent); cursor:pointer; }
         .notif-item { display:flex; align-items:flex-start; gap:12px; padding:16px 0; border:none; border-bottom:1px solid var(--border); background:none; width:100%; text-align:left; font-family:'Inter',sans-serif; cursor:pointer; }
         .notif-item:disabled { cursor:default; }
@@ -376,7 +379,7 @@
         .cat-menu-item { display:flex; align-items:center; gap:14px; background:#F8FAFC; border:1px solid var(--border); border-radius:12px; padding:14px 16px; cursor:pointer; transition:all 0.15s; text-align:left; width:100%; }
         .cat-menu-item:hover { background:#F1F5F9; }
         .cat-menu-item.active { background:rgba(59,130,246,0.12); border-color:rgba(59,130,246,0.35); }
-        .cat-menu-icon { font-size:22px; line-height:1; flex-shrink:0; }
+        .cat-menu-icon { display:flex; align-items:center; justify-content:center; line-height:1; flex-shrink:0; }
         .cat-menu-label { font-family:'Inter',sans-serif; font-size:15px; font-weight:600; color:var(--text); flex:1; }
         .cat-menu-item.active .cat-menu-label { color:var(--accent); }
         .cat-menu-badge { font-size:10px; background:rgba(0,112,192,0.1); color:var(--accent); border-radius:10px; padding:2px 8px; }
