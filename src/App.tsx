@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.14.0";
+const APP_VERSION = "1.14.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -945,15 +945,26 @@ function CategoryIcon({ id, size = 20, color = "currentColor", strokeWidth = 1.8
   );
 }
 
+// Builds a colored-pin Google Maps marker icon (data URI) from a 24x24 glyph's inner SVG
+// markup -- shared by the category markers and the crew-hotel marker so every pin on the
+// map uses the same sleek line-icon treatment.
+function pinMarkerIconUrl(innerGlyph: string, color: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">` +
+    `<circle cx="17" cy="17" r="15" fill="${color}" stroke="#fff" stroke-width="2"/>` +
+    `<g transform="translate(8,8) scale(0.75)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${innerGlyph}</g>` +
+    `</svg>`;
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+
 // Same glyph set, rendered as a colored pin for Google Maps markers so map pins match the
 // category icons shown everywhere else in the app.
 function categoryMarkerIconUrl(cat: { id: string; color: string }): string {
-  const inner = CATEGORY_ICON_PATHS[cat.id] || CATEGORY_ICON_PATHS.other;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">` +
-    `<circle cx="17" cy="17" r="15" fill="${cat.color}" stroke="#fff" stroke-width="2"/>` +
-    `<g transform="translate(8,8) scale(0.75)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</g>` +
-    `</svg>`;
-  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+  return pinMarkerIconUrl(CATEGORY_ICON_PATHS[cat.id] || CATEGORY_ICON_PATHS.other, cat.color);
+}
+
+const HOTEL_ICON_PATH = '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M9 21v-5h6v5"/><circle cx="9" cy="8" r="1"/><circle cx="15" cy="8" r="1"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/>';
+function hotelMarkerIconUrl(): string {
+  return pinMarkerIconUrl(HOTEL_ICON_PATH, "#F59E0B");
 }
 
 const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boolean; destCode: string; category?: string; tipId?: number }> = [];
@@ -1139,6 +1150,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   const mapInstanceRef = useRef<any>(null);
   const [hotelCoords, setHotelCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [copiedTipId, setCopiedTipId] = useState<string | number | null>(null);
+  const [showCatPicker, setShowCatPicker] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1208,7 +1220,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           position: hotelCenter,
           map,
           zIndex: 999,
-          icon: { path: "M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.63L12,2L9.19,8.63L2,9.24L7.46,13.97L5.82,21L12,17.27Z", fillColor: "#F59E0B", fillOpacity: 1, strokeColor: "#92400E", strokeWeight: 1, scale: 1.5, anchor: new google.maps.Point(12, 12) }
+          icon: { url: hotelMarkerIconUrl(), scaledSize: new google.maps.Size(34, 34), anchor: new google.maps.Point(17, 17) }
         });
         const hotelInfo = new google.maps.InfoWindow({
           content: `<strong>${dest.crewHotel.replace(/\s*\([^)]*\)\s*$/, "").trim()}</strong><br/><span style="font-size:11px;color:#4A7C9E">Crew hotel</span>`
@@ -1388,6 +1400,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 <button className="dest-meta-chip dest-meta-chip-btn" onClick={() => setShowWeather(true)}>🌡 {liveWeather ?? dest.weather}</button>
                 <span className="dest-meta-chip">🕐 {fmtTime(offset)}</span>
                 <span className="dest-meta-chip">✈️ {diffStr}</span>
+                {dest.crewHotel && (
+                  <button className="dest-meta-chip dest-meta-chip-btn dest-meta-chip-hotel" onClick={() => setShowMap(true)}>🏨 {dest.crewHotel}</button>
+                )}
               </div>
               <button className="map-view-btn" onClick={() => setShowMap(true)}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:5}}><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
@@ -1397,21 +1412,28 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           );
         })()}
       </div>
-      <div className="crew-hotel-bar">
-        <span>🏨</span><span className="hotel-text">{dest.crewHotel}</span>
-      </div>
-      <div className="cat-scroll">
-        {CATEGORIES.map(cat => {
-          const count = crewTips.filter(t => t.category === cat.id).length;
-          return (
-            <button key={cat.id} className={`cat-chip${activeCategory === cat.id ? " active" : ""}`}
-              onClick={() => setActiveCategory(cat.id)}>
-              {cat.label}
-              {count > 0 && <span className="cat-badge">{count}</span>}
-            </button>
-          );
-        })}
-      </div>
+      {(() => {
+        const activeCat = CATEGORIES.find(c => c.id === activeCategory);
+        const activeCount = crewTips.filter(t => t.category === activeCategory).length;
+        return (
+          <button className="cat-picker-btn" onClick={() => setShowCatPicker(true)}>
+            {activeCat && <CategoryIcon id={activeCat.id} color={activeCat.color} size={18} />}
+            <span className="cat-picker-label">{activeCat?.label || "Category"}</span>
+            {activeCount > 0 && <span className="cat-badge">{activeCount}</span>}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginLeft:"auto"}}><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+        );
+      })()}
+      {showCatPicker && (
+        <CategoryMenu
+          onClose={() => setShowCatPicker(false)}
+          activeCategory={activeCategory}
+          onSelectCategory={(catId: string) => setActiveCategory(catId)}
+          tips={crewTips}
+          title={dest.city}
+          subtitle="Browse by category"
+        />
+      )}
       <div className="content-pad">
         <div className="ai-panel">
           <div className="ai-panel-label">🤖 AI BRIEFING</div>
@@ -2303,7 +2325,7 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
           <div className="profile-tabs">
             <button className={`profile-tab${tab === "tips" ? " active" : ""}`} onClick={() => setTab("tips")}>My Tips</button>
             <button className={`profile-tab${tab === "connections" ? " active" : ""}`} onClick={() => setTab("connections")}>
-              Connections {connections.accepted.length > 0 && <span className="tab-badge">{connections.accepted.length}</span>}
+              Connections
               {connections.incoming.length > 0 && <span className="tab-badge tab-badge-alert">{connections.incoming.length}</span>}
             </button>
             <button className={`profile-tab${tab === "account" ? " active" : ""}`} onClick={() => setTab("account")}>Account</button>
@@ -2545,19 +2567,24 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
 }
 
 // ─── CATEGORY MENU ─────────────────────────────────────────────────────────────
-function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips }) {
+function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips, tips, title, subtitle }: {
+  onClose: () => void; activeCategory: string; onSelectCategory: (id: string) => void;
+  addedTips?: Record<string, any[]>; tips?: any[]; title?: string; subtitle?: string;
+}) {
   return (
     <div className="cat-menu-backdrop" onClick={onClose}>
       <div className="cat-menu-sheet" onClick={e => e.stopPropagation()}>
         <div className="cat-menu-handle" />
-        <div className="cat-menu-title">Browse by Category</div>
-        <div className="cat-menu-dest">Latest tips across every destination</div>
+        <div className="cat-menu-title">{title || "Browse by Category"}</div>
+        <div className="cat-menu-dest">{subtitle || "Latest tips across every destination"}</div>
         <div className="cat-menu-list">
           {CATEGORIES.map(cat => {
-            const count = (Object.values(DESTINATIONS) as any[]).reduce(
-              (sum, d) => sum + [...(d.crewTips || []), ...((addedTips[d.code]) || [])].filter((t: any) => t.category === cat.id).length,
-              0
-            );
+            const count = tips
+              ? tips.filter((t: any) => t.category === cat.id).length
+              : (Object.values(DESTINATIONS) as any[]).reduce(
+                  (sum, d) => sum + [...(d.crewTips || []), ...(((addedTips || {})[d.code]) || [])].filter((t: any) => t.category === cat.id).length,
+                  0
+                );
             const isActive = activeCategory === cat.id;
             return (
               <button key={cat.id}
