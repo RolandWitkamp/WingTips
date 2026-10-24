@@ -4,12 +4,12 @@
 -- enforcement: anyone calling the Supabase API directly, bypassing the app's own JS check,
 -- gets rejected here too.
 
--- Every accepted signup is logged here so the app owner can see new sign-ups in-app (Notifications
--- screen, bell icon) -- there's no manual approval step (any @klm.com address can self-register
--- and use the app immediately once they confirm their email), this is purely a heads-up, not a
--- gate. Only readable by the owner's own account (matched by email, not a role/admin column --
--- there's exactly one owner); written only by handle_new_user below, which runs as security
--- definer so it can insert here regardless of who's signing up.
+-- Logged once someone actually confirms their e-mail (clicks the confirmation/invite link), not
+-- at signup-request time -- "a row got created" only means someone started the process, not that
+-- they're a real user; the owner wants to know when someone's actually in, see
+-- handle_user_confirmed further down. Readable only by the owner's own account (matched by email,
+-- not a role/admin column -- there's exactly one owner); written only by that function, which runs
+-- as security definer so it can insert here regardless of whose account just got confirmed.
 create table if not exists admin_signup_log (
   id bigint generated always as identity primary key,
   email text not null,
@@ -19,18 +19,51 @@ alter table admin_signup_log enable row level security;
 drop policy if exists "admin_signup_log_select_owner" on admin_signup_log;
 create policy "admin_signup_log_select_owner" on admin_signup_log for select using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');
 
+-- Named exceptions to the @klm.com check below, for test accounts (e.g. a non-KLM person helping
+-- test the app) that should be able to sign up anyway. Manage this from the Supabase dashboard's
+-- Table Editor -- add or remove a row, no SQL needed. Not exposed via the API (no RLS policy
+-- grants anon/authenticated access), only handle_new_user reads it, as security definer.
+create table if not exists signup_allowlist (
+  email text primary key,
+  note text,
+  created_at timestamptz not null default now()
+);
+alter table signup_allowlist enable row level security;
+
+-- Schema-qualified (public.x) and search_path pinned below: the role that runs this trigger for
+-- an admin-initiated "Invite user" turned out to have a different/narrower search_path than the
+-- one used for normal self-signup, so the unqualified table names resolved fine during testing
+-- earlier (self-signup) but failed with "relation does not exist" the first time this ran via
+-- Invite user. Qualifying explicitly is also the standard safe pattern for a security definer
+-- function regardless -- it shouldn't depend on whatever search_path the caller happens to have.
 create or replace function handle_new_user() returns trigger as $$
 begin
-  if new.email !~* '@klm\.com$' then
+  if new.email !~* '@klm\.com$' and not exists (
+    select 1 from public.signup_allowlist where lower(email) = lower(new.email)
+  ) then
     raise exception 'Only @klm.com e-mail addresses can create an account.';
   end if;
-  insert into admin_signup_log (email) values (new.email);
   return new;
-end; $$ language plpgsql security definer;
+end; $$ language plpgsql security definer set search_path = public;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created before insert on auth.users
   for each row execute procedure handle_new_user();
+
+-- Fires once, exactly when email_confirmed_at first goes from null to set -- that's the same
+-- underlying event for both self-signup (clicking the confirmation link) and an admin invite
+-- (accepting it), so this one trigger covers both without caring which path created the account.
+create or replace function handle_user_confirmed() returns trigger as $$
+begin
+  if old.email_confirmed_at is null and new.email_confirmed_at is not null then
+    insert into public.admin_signup_log (email) values (new.email);
+  end if;
+  return new;
+end; $$ language plpgsql security definer set search_path = public;
+
+drop trigger if exists on_auth_user_confirmed on auth.users;
+create trigger on_auth_user_confirmed after update on auth.users
+  for each row execute procedure handle_user_confirmed();
 
 -- Dashboard changes needed too (can't be done via SQL):
 -- Authentication -> Providers -> Email -> "Allow new users to sign up" ON, "Confirm email" ON.

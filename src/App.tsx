@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.11.1";
+const APP_VERSION = "1.12.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
@@ -419,8 +419,19 @@ function useConnections(userId: string | null) {
     if (outgoing.some(r => r.userId === otherUserId)) return "outgoing";
     return "none";
   }
+  // Searches every crew profile by name, not just existing connections -- profiles are readable
+  // by any signed-in user already (see profiles_select_all in supabase_schema.sql, broadened
+  // because tips already show the author's name to everyone), so this needs no new RLS policy.
+  async function searchUsers(query: string): Promise<{ userId: string; name: string; role: string }[]> {
+    const q = query.trim();
+    if (!q || !userId) return [];
+    const { data, error } = await supabase.from("profiles").select("id,name,role")
+      .ilike("name", `%${q}%`).neq("id", userId).limit(20);
+    if (error) { console.error("searchUsers failed:", error); return []; }
+    return (data || []).map((p: any) => ({ userId: p.id, name: p.name || "Crew member", role: p.role || "Cabin Crew" }));
+  }
 
-  return { loaded, userId, accepted, incoming, outgoing, sendRequest, acceptRequest, declineRequest, relation, reload: load };
+  return { loaded, userId, accepted, incoming, outgoing, sendRequest, acceptRequest, declineRequest, relation, searchUsers, reload: load };
 }
 
 // Recommendations ("crew tips") used to be written only to this browser's localStorage, so no
@@ -2045,9 +2056,23 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
   const [tab, setTab] = useState("tips");
   const [editing, setEditing] = useState(!profile.name);
   const [connSearch, setConnSearch] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<{ userId: string; name: string; role: string }[] | null>(null);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
   const [draft, setDraft] = useState({ ...profile });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Searches every crew member by name once there's enough to search for, not just people
+  // already connected -- debounced so it doesn't fire a query on every keystroke.
+  useEffect(() => {
+    const q = connSearch.trim();
+    if (q.length < 2) { setUserSearchResults(null); return; }
+    setUserSearchLoading(true);
+    const timer = setTimeout(() => {
+      connections.searchUsers(q).then((results: any) => { setUserSearchResults(results); setUserSearchLoading(false); });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [connSearch]);
 
   const myTips = Object.entries(addedTips as Record<string, any[]>).flatMap(([code, tips]) =>
     tips.filter((t: any) => t.name === profile.name).map(t => ({ ...t, destCode: code, destCity: (DESTINATIONS as any)[code]?.city || code }))
@@ -2160,42 +2185,57 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
                     ))}
                   </div>
                 )}
-                {connections.accepted.length > 0 && (
-                  <input
-                    className="conn-search-input"
-                    placeholder="Search connections..."
-                    value={connSearch}
-                    onChange={(e: any) => setConnSearch(e.target.value)}
-                  />
-                )}
-                {connections.accepted.length === 0 && connections.outgoing.length === 0 && connections.incoming.length === 0
-                  ? <div className="no-tips">No connections yet — tap Connect on a crew tip to add someone.</div>
-                  : connections.accepted
-                      .filter((r: any) => r.name.toLowerCase().includes(connSearch.toLowerCase()))
-                      .map((r: any) => (
-                        <div key={r.reqId} className="connection-card">
-                          <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
-                          <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
-                            <div className="crew-card-name crew-card-name-link">{r.name}</div>
-                            <div className="crew-card-role">{r.role}</div>
-                          </div>
-                          <button className="disconnect-btn" onClick={() => connections.declineRequest(r.reqId)}>Remove</button>
-                        </div>
-                      ))
-                }
-                {connections.outgoing.length > 0 && (
+                <input
+                  className="conn-search-input"
+                  placeholder="Search all crew members..."
+                  value={connSearch}
+                  onChange={(e: any) => setConnSearch(e.target.value)}
+                />
+                {connSearch.trim().length >= 2 ? (
                   <>
-                    <div className="conn-requests-label" style={{marginTop:18}}>Pending — waiting for them to accept</div>
-                    {connections.outgoing.map((r: any) => (
-                      <div key={r.reqId} className="connection-card">
+                    {userSearchLoading && <div className="no-tips">Searching…</div>}
+                    {!userSearchLoading && userSearchResults?.length === 0 && <div className="no-tips">No crew members found for "{connSearch.trim()}".</div>}
+                    {!userSearchLoading && userSearchResults?.map((r: any) => (
+                      <div key={r.userId} className="connection-card">
                         <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
                         <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
                           <div className="crew-card-name crew-card-name-link">{r.name}</div>
                           <div className="crew-card-role">{r.role}</div>
                         </div>
-                        <button className="disconnect-btn" onClick={() => connections.declineRequest(r.reqId)}>Cancel</button>
+                        <ConnectButton authorId={r.userId} connections={connections} className="connect-btn" />
                       </div>
                     ))}
+                  </>
+                ) : (
+                  <>
+                    {connections.accepted.length === 0 && connections.outgoing.length === 0 && connections.incoming.length === 0
+                      ? <div className="no-tips">No connections yet — search above, or tap Connect on a crew tip to add someone.</div>
+                      : connections.accepted.map((r: any) => (
+                          <div key={r.reqId} className="connection-card">
+                            <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
+                            <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
+                              <div className="crew-card-name crew-card-name-link">{r.name}</div>
+                              <div className="crew-card-role">{r.role}</div>
+                            </div>
+                            <button className="disconnect-btn" onClick={() => connections.declineRequest(r.reqId)}>Remove</button>
+                          </div>
+                        ))
+                    }
+                    {connections.outgoing.length > 0 && (
+                      <>
+                        <div className="conn-requests-label" style={{marginTop:18}}>Pending — waiting for them to accept</div>
+                        {connections.outgoing.map((r: any) => (
+                          <div key={r.reqId} className="connection-card">
+                            <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
+                            <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
+                              <div className="crew-card-name crew-card-name-link">{r.name}</div>
+                              <div className="crew-card-role">{r.role}</div>
+                            </div>
+                            <button className="disconnect-btn" onClick={() => connections.declineRequest(r.reqId)}>Cancel</button>
+                          </div>
+                        ))}
+                      </>
+                    )}
                   </>
                 )}
               </>
