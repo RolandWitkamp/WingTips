@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.14.1";
+const APP_VERSION = "1.15.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -194,6 +194,23 @@ function tipMapsUrl(tip: any, dest: any): string {
     : tip.text.replace(/[^\w\s,''-]/g, " ").slice(0, 60).trim();
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q + " " + dest.city)}`;
 }
+// Place tips are stored as "📍 Place — note"; on screen the place becomes a bold title instead.
+function splitTipText(text: string): { title: string; body: string } {
+  const t = text || "";
+  if (!t.startsWith("📍")) return { title: "", body: t };
+  const rest = t.replace(/^📍\s*/, "");
+  const i = rest.indexOf("—");
+  return i < 0 ? { title: rest.trim(), body: "" } : { title: rest.slice(0, i).trim(), body: rest.slice(i + 1).trim() };
+}
+function TipText({ text, className }: { text: string; className: string }) {
+  const { title, body } = splitTipText(text);
+  return (
+    <>
+      {title && <div className="tip-title">{title}</div>}
+      {body && <p className={className}>{body}</p>}
+    </>
+  );
+}
 function buildTipShareText(tip: any, dest: any): string {
   const cat = CATEGORIES.find(c => c.id === tip.category);
   const lines = [`${dest.flag} ${dest.city} · ${cat?.label || tip.category}`, tip.text];
@@ -237,15 +254,14 @@ function useWeather(code: string, city: string, country: string) {
   return weather;
 }
 
-function weatherEmoji(main: string): string {
+function weatherIcon(main: string): string {
   const m = (main || "").toLowerCase();
-  if (m.includes("thunderstorm")) return "⛈️";
-  if (m.includes("snow")) return "❄️";
-  if (m.includes("rain") || m.includes("drizzle")) return "🌧️";
-  if (m.includes("cloud")) return "☁️";
-  if (m.includes("mist") || m.includes("fog") || m.includes("haze")) return "🌫️";
-  if (m.includes("clear")) return "☀️";
-  return "🌡️";
+  if (m.includes("thunderstorm")) return "storm";
+  if (m.includes("snow")) return "snow";
+  if (m.includes("rain") || m.includes("drizzle")) return "rain";
+  if (m.includes("mist") || m.includes("fog") || m.includes("haze")) return "fog";
+  if (m.includes("clear")) return "sun";
+  return "cloud";
 }
 
 // Only fetched when the weather overlay is actually opened (enabled), not on every destination
@@ -905,18 +921,18 @@ function groupDestsByContinentCountry(dests: any[]) {
 }
 
 const CATEGORIES = [
-  { id: "food",          label: "Food & Drink",    icon: "🍽️", color: "#F97316" },
-  { id: "supermarket",   label: "Supermarket",     icon: "🛒", color: "#84CC16" },
-  { id: "fitness",       label: "Fitness",         icon: "🏋️", color: "#22C55E" },
-  { id: "beauty",        label: "Beauty",          icon: "💅", color: "#EC4899" },
-  { id: "wellness",      label: "Wellness & Spa",  icon: "🧘", color: "#14B8A6" },
-  { id: "shopping",      label: "Shopping",        icon: "🛍️", color: "#A855F7" },
-  { id: "nightlife",     label: "Nightlife",       icon: "🍸", color: "#6366F1" },
-  { id: "accommodation", label: "Accommodation",   icon: "🏨", color: "#0EA5E9" },
-  { id: "working",       label: "Working",         icon: "💻", color: "#64748B" },
-  { id: "gems",          label: "Hidden Gems",     icon: "💎", color: "#D946EF" },
-  { id: "roadtrip",      label: "Road Trip",       icon: "🚗", color: "#F59E0B" },
-  { id: "other",         label: "Other",           icon: "📌", color: "#78716C" },
+  { id: "food",          label: "Food & Drink",    color: "#F97316" },
+  { id: "supermarket",   label: "Supermarket",     color: "#84CC16" },
+  { id: "fitness",       label: "Fitness",         color: "#22C55E" },
+  { id: "beauty",        label: "Beauty",          color: "#EC4899" },
+  { id: "wellness",      label: "Wellness & Spa",  color: "#14B8A6" },
+  { id: "shopping",      label: "Shopping",        color: "#A855F7" },
+  { id: "nightlife",     label: "Nightlife",       color: "#6366F1" },
+  { id: "accommodation", label: "Accommodation",   color: "#0EA5E9" },
+  { id: "working",       label: "Working",         color: "#64748B" },
+  { id: "gems",          label: "Hidden Gems",     color: "#D946EF" },
+  { id: "roadtrip",      label: "Road Trip",       color: "#F59E0B" },
+  { id: "other",         label: "Other",           color: "#78716C" },
 ];
 
 // Single source of truth for the sleek line-icon set used across category chips, the
@@ -954,6 +970,61 @@ function pinMarkerIconUrl(innerGlyph: string, color: string): string {
     `<g transform="translate(8,8) scale(0.75)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${innerGlyph}</g>` +
     `</svg>`;
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+
+const CLOUD_HIGH = '<path d="M7 15h10a4 4 0 0 0 0-8 6 6 0 0 0-11.3 2A3 3 0 0 0 7 15z"/>';
+const UI_ICON_PATHS: Record<string, string> = {
+  back: '<path d="M15 18l-6-6 6-6"/>',
+  chevronRight: '<path d="M9 6l6 6-6 6"/>',
+  chevronDown: '<path d="M6 9l6 6 6-6"/>',
+  chevronUp: '<path d="M18 15l-6-6-6 6"/>',
+  close: '<path d="M18 6 6 18M6 6l12 12"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  arrowRight: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  share: '<path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v12M7 8l5-5 5 5"/>',
+  heart: '<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/>',
+  comment: '<path d="M4 5h16v11H9l-5 4z"/>',
+  star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  pin: '<path d="M12 21s-7-6.5-7-11a7 7 0 1 1 14 0c0 4.5-7 11-7 11Z"/><circle cx="12" cy="10" r="2.5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  hotel: '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M9 21v-5h6v5"/><circle cx="9" cy="8" r="1"/><circle cx="15" cy="8" r="1"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/>',
+  sparkle: '<path d="M12 3 9.5 9.5 3 12l6.5 2.5L12 21l2.5-6.5L21 12l-6.5-2.5Z"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14a6.5 6.5 0 0 1 3.5 6"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+  tag: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  map: '<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><path d="M9 3v15M15 6v15"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  bookmark: '<path d="M6 3h12v18l-6-4-6 4z"/>',
+  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
+  loader: '<path d="M12 3a9 9 0 1 0 9 9"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 0-8 6 6 0 0 0-11.3 2A3 3 0 0 0 7 18z"/>',
+  rain: CLOUD_HIGH + '<path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"/>',
+  snow: CLOUD_HIGH + '<path d="M8 19h.01M12 19h.01M16 19h.01M10 22h.01M14 22h.01"/>',
+  storm: CLOUD_HIGH + '<path d="m13 14-2 4h3l-2 4"/>',
+  fog: '<path d="M4 10h16M4 14h16M6 18h12M7 6h10"/>',
+};
+
+function Icon({ name, size = 18, color = "currentColor", strokeWidth = 1.8, className }: { name: string; size?: number; color?: string; strokeWidth?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth}
+      strokeLinecap="round" strokeLinejoin="round" className={className} style={{ flexShrink: 0 }} aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: UI_ICON_PATHS[name] || "" }} />
+  );
 }
 
 // Same glyph set, rendered as a colored pin for Google Maps markers so map pins match the
@@ -1007,19 +1078,19 @@ function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
        
         <div className="search-wrap">
           <div className="search-box">
-            <span className="search-icon">🔍</span>
+            <span className="search-icon"><Icon name="search" size={18} /></span>
             <input className="search-field" placeholder="City or IATA code — NRT, DXB, JFK…"
               value={query}
               onChange={e => { setQuery(e.target.value); setShowSugg(true); }}
               onFocus={() => suggestions.length > 0 && setShowSugg(true)}
               onKeyDown={e => e.key === "Enter" && (setShowSugg(false), onSearch(query))} />
-            <button className="search-go" onClick={() => { setShowSugg(false); onSearch(query); }}>→</button>
+            <button className="search-go" aria-label="Search" onClick={() => { setShowSugg(false); onSearch(query); }}><Icon name="arrowRight" size={18} strokeWidth={2.2} /></button>
           </div>
           {showSugg && suggestions.length > 0 && (
             <div className="sugg-dropdown">
               {suggestions.map((d: any) => (
                 <button key={d.code} className="sugg-item" onMouseDown={() => pickSuggestion(d.code)}>
-                  <span className="sugg-primary">{d.flag} {d.city}</span>
+                  <span className="sugg-primary"><Flag emoji={d.flag} />{d.city}</span>
                   <span className="sugg-addr">{d.country} · {d.code}</span>
                 </button>
               ))}
@@ -1029,7 +1100,7 @@ function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
       </div>
       {recentDests.length > 0 && (
         <div className="section-block">
-          <div className="section-label">QUICK ACCESS</div>
+          <div className="section-label">Quick access</div>
           <div className="dest-row">
             {recentDests.slice(0, 3).map((code: string) => {
               const d = (DESTINATIONS as any)[code];
@@ -1046,11 +1117,11 @@ function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
       )}
       {latestTip && (
         <div className="section-block">
-          <div className="section-label">LATEST FROM THE CREW</div>
+          <div className="section-label">Latest from the crew</div>
           <button className="top-tip-card" onClick={() => onDestClick(latestTip.destCode)}>
-            <div className="top-tip-dest">{latestTip.destFlag} {latestTip.destCity}</div>
-            <div className="top-tip-text">{latestTip.tip.text}</div>
-            <div className="top-tip-author">— {latestTip.tip.name}, {latestTip.tip.role} · 👍 {latestTip.tip.likes || 0}</div>
+            <div className="top-tip-dest"><CategoryIcon id={latestTip.tip.category || "other"} color={CATEGORIES.find(c => c.id === latestTip.tip.category)?.color} size={16} />{latestTip.destCity}</div>
+            <TipText text={latestTip.tip.text} className="top-tip-text" />
+            <div className="top-tip-author">{latestTip.tip.name}, {latestTip.tip.role}<span className="top-tip-likes"><Icon name="heart" size={14} />{latestTip.tip.likes || 0}</span></div>
           </button>
         </div>
       )}
@@ -1110,6 +1181,11 @@ function flagToCode(emoji: string): string {
   return [...emoji].map(c => String.fromCodePoint(c.codePointAt(0)! - 0x1F1E6 + 65)).join("").toLowerCase();
 }
 
+function Flag({ emoji }: { emoji?: string }) {
+  if (!emoji) return null;
+  return <img className="flag-mini" src={`https://flagcdn.com/${flagToCode(emoji)}.svg`} alt="" loading="lazy" />;
+}
+
 function fmtTime(utcOffset: number) {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -1125,13 +1201,13 @@ function ConnectButton({ authorId, connections, className }: any) {
   if (!authorId || !connections?.userId) return null;
   const rel = connections.relation(authorId);
   if (rel === "self") return null;
-  if (rel === "accepted") return <button className={`${className} connected`} disabled>✓ Connected</button>;
+  if (rel === "accepted") return <button className={`${className} connected`} disabled><Icon name="check" size={14} strokeWidth={2.2} />Connected</button>;
   if (rel === "outgoing") return <button className={className} disabled>Pending</button>;
   if (rel === "incoming") {
     const req = connections.incoming.find((r: any) => r.userId === authorId);
     return <button className={className} onClick={(e: any) => { e.stopPropagation(); req && connections.acceptRequest(req.reqId); }}>Accept request</button>;
   }
-  return <button className={className} onClick={(e: any) => { e.stopPropagation(); connections.sendRequest(authorId); }}>+ Connect</button>;
+  return <button className={className} onClick={(e: any) => { e.stopPropagation(); connections.sendRequest(authorId); }}><Icon name="plus" size={14} strokeWidth={2.2} />Connect</button>;
 }
 
 function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment }) {
@@ -1206,7 +1282,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         });
         const viewBtnId = `map-view-tip-${tip.id}`;
         const infoWindow = new google.maps.InfoWindow({
-          content: `<div style="min-width:150px"><strong>${tip.text.split("—")[0].replace("📍","").trim()}</strong><br/><span style="font-size:11px;color:#4A7C9E">${cat?.label || ""}</span><br/><button id="${viewBtnId}" style="margin-top:7px;background:#00A1DE;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-family:Inter,sans-serif;cursor:pointer;">View recommendation →</button></div>`
+          content: `<div style="min-width:160px;font-family:'Plus Jakarta Sans',sans-serif;color:#10233F"><strong style="font-size:14px">${tip.text.split("—")[0].replace("📍","").trim()}</strong><br/><span style="font-size:12px;color:#4A6A8C">${cat?.label || ""}</span><br/><button id="${viewBtnId}" style="margin-top:8px;background:#003082;color:#fff;border:none;border-radius:14px;padding:7px 12px;font-size:12px;font-family:inherit;font-weight:700;cursor:pointer;">View recommendation</button></div>`
         });
         marker.addListener("click", () => infoWindow.open(map, marker));
         infoWindow.addListener("domready", () => {
@@ -1223,7 +1299,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           icon: { url: hotelMarkerIconUrl(), scaledSize: new google.maps.Size(34, 34), anchor: new google.maps.Point(17, 17) }
         });
         const hotelInfo = new google.maps.InfoWindow({
-          content: `<strong>${dest.crewHotel.replace(/\s*\([^)]*\)\s*$/, "").trim()}</strong><br/><span style="font-size:11px;color:#4A7C9E">Crew hotel</span>`
+          content: `<div style="font-family:'Plus Jakarta Sans',sans-serif;color:#10233F"><strong style="font-size:14px">${dest.crewHotel.replace(/\s*\([^)]*\)\s*$/, "").trim()}</strong><br/><span style="font-size:12px;color:#4A6A8C">Crew hotel</span></div>`
         });
         hotelMarker.addListener("click", () => hotelInfo.open(map, hotelMarker));
       }
@@ -1257,7 +1333,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); onFocusConsumed?.(); }
   }, [activeCategory, focusTipId]);
 
-  if (!dest) return <div className="screen"><button onClick={onBack}>← Back</button></div>;
+  if (!dest) return <div className="screen"><button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button></div>;
 
   const [sortBy, setSortBy] = useState<"recent" | "liked">("recent");
   const [filterRole, setFilterRole] = useState("all");
@@ -1325,11 +1401,11 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         <div className="map-overlay">
           <div className="map-header">
             <div className="map-header-title">{dest.city} — weather</div>
-            <button className="map-close-btn" onClick={() => setShowWeather(false)}>✕ Close</button>
+            <button className="map-close-btn" onClick={() => setShowWeather(false)}><Icon name="close" size={14} strokeWidth={2.2} />Close</button>
           </div>
           <div className="weather-overlay-body">
             <div className="weather-today">
-              <div className="weather-today-emoji">{weatherEmoji(forecast?.[0]?.main || "")}</div>
+              <Icon name={weatherIcon(forecast?.[0]?.main || "")} size={52} color="var(--accent)" strokeWidth={1.5} />
               <div className="weather-today-temp">{liveWeather ?? dest.weather}</div>
               <div className="weather-today-label">Right now</div>
             </div>
@@ -1341,7 +1417,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 {forecast.map(day => (
                   <div key={day.date} className="forecast-day">
                     <div className="forecast-day-date">{new Date(day.date).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</div>
-                    <div className="forecast-day-emoji">{weatherEmoji(day.main)}</div>
+                    <div className="forecast-day-emoji"><Icon name={weatherIcon(day.main)} size={22} color="var(--accent)" /></div>
                     <div className="forecast-day-desc">{day.desc}</div>
                     <div className="forecast-day-temps"><b>{day.max}°</b> / {day.min}°</div>
                   </div>
@@ -1355,7 +1431,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         <div className="map-overlay">
           <div className="map-header">
             <div className="map-header-title">{dest.city} — recommendations</div>
-            <button className="map-close-btn" onClick={() => setShowMap(false)}>✕ Close</button>
+            <button className="map-close-btn" onClick={() => setShowMap(false)}><Icon name="close" size={14} strokeWidth={2.2} />Close</button>
           </div>
           {crewTips.filter((t: any) => t.coords).length === 0 && (
             <div className="map-hint-banner">No pinned recommendations yet{dest.crewHotel ? " — showing the crew hotel" : ` — showing ${dest.city}`}. Add a tip with a place name to pin it here.</div>
@@ -1375,7 +1451,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                   if (!cat) return null;
                   return (
                     <div key={id} className="map-legend-item">
-                      <span className="map-legend-dot" style={{ background: cat.color }} />
+                      <span className="map-legend-dot" style={{ background: cat.color }}><CategoryIcon id={cat.id} color="#fff" size={11} strokeWidth={2.4} /></span>
                       {cat.label}
                     </div>
                   );
@@ -1386,29 +1462,24 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         </div>
       )}
       <div className="dest-hero">
-        <button className="back-btn" onClick={onBack}>← Back</button>
-        <img className="dest-flag-big" src={`https://flagcdn.com/${flagToCode(dest.flag)}.svg`} alt={dest.country} />
+        <button className="back-btn" onClick={onBack} aria-label="Back"><Icon name="back" size={20} strokeWidth={2} /></button>
+        <div className="dest-hero-country">
+          <img className="dest-flag-big" src={`https://flagcdn.com/${flagToCode(dest.flag)}.svg`} alt="" />
+          {dest.country} · {code}
+        </div>
         <div className="dest-hero-name">{dest.city}</div>
-        <div className="dest-hero-country">{dest.country}</div>
         {(() => {
           const offset = TZ_OFFSETS[code] ?? 0;
           const diff = offset - 2;
-          const diffStr = diff === 0 ? "= AMS" : `${diff > 0 ? "+" : ""}${diff}h vs AMS`;
+          const diffStr = diff === 0 ? "= AMS" : `${diff > 0 ? "+" : "−"}${Math.abs(diff)}h`;
           return (
-            <>
-              <div className="dest-meta-row">
-                <button className="dest-meta-chip dest-meta-chip-btn" onClick={() => setShowWeather(true)}>🌡 {liveWeather ?? dest.weather}</button>
-                <span className="dest-meta-chip">🕐 {fmtTime(offset)}</span>
-                <span className="dest-meta-chip">✈️ {diffStr}</span>
-                {dest.crewHotel && (
-                  <button className="dest-meta-chip dest-meta-chip-btn dest-meta-chip-hotel" onClick={() => setShowMap(true)}>🏨 {dest.crewHotel}</button>
-                )}
-              </div>
-              <button className="map-view-btn" onClick={() => setShowMap(true)}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:5}}><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
-                Map view
-              </button>
-            </>
+            <div className="dest-meta-row">
+              <button className="dest-meta-chip dest-meta-chip-btn" onClick={() => setShowWeather(true)}><Icon name="cloud" size={16} color="var(--accent)" />{liveWeather ?? dest.weather}</button>
+              <span className="dest-meta-chip"><Icon name="clock" size={16} color="var(--accent)" />{fmtTime(offset)} <span className="dest-meta-sub">{diffStr}</span></span>
+              {dest.crewHotel && (
+                <button className="dest-meta-chip dest-meta-chip-btn dest-meta-chip-hotel" onClick={() => setShowMap(true)}><Icon name="hotel" size={16} color="var(--accent)" /><span className="dest-meta-ellipsis">{dest.crewHotel}</span></button>
+              )}
+            </div>
           );
         })()}
       </div>
@@ -1416,12 +1487,15 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         const activeCat = CATEGORIES.find(c => c.id === activeCategory);
         const activeCount = crewTips.filter(t => t.category === activeCategory).length;
         return (
-          <button className="cat-picker-btn" onClick={() => setShowCatPicker(true)}>
-            {activeCat && <CategoryIcon id={activeCat.id} color={activeCat.color} size={18} />}
-            <span className="cat-picker-label">{activeCat?.label || "Category"}</span>
-            {activeCount > 0 && <span className="cat-badge">{activeCount}</span>}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginLeft:"auto"}}><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
+          <div className="dest-action-row">
+            <button className="cat-picker-btn" onClick={() => setShowCatPicker(true)}>
+              {activeCat && <CategoryIcon id={activeCat.id} color="#fff" size={18} />}
+              <span className="cat-picker-label">{activeCat?.label || "Category"}</span>
+              {activeCount > 0 && <span className="cat-picker-count">{activeCount}</span>}
+              <Icon name="chevronDown" size={16} strokeWidth={2.2} className="cat-picker-chevron" />
+            </button>
+            <button className="map-view-btn" onClick={() => setShowMap(true)} aria-label="Map view"><Icon name="map" size={20} /></button>
+          </div>
         );
       })()}
       {showCatPicker && (
@@ -1436,7 +1510,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       )}
       <div className="content-pad">
         <div className="ai-panel">
-          <div className="ai-panel-label">🤖 AI BRIEFING</div>
+          <div className="ai-panel-label"><Icon name="sparkle" size={16} />AI briefing</div>
           {(() => {
             const sum = summaries[`${code}:${activeCategory}`];
             if (categoryTipCount === 0) return <div className="ai-panel-headline" style={{color:"var(--text2)",fontWeight:400}}>No crew tips yet in this category — nothing to summarize.</div>;
@@ -1445,13 +1519,12 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             return <p className="ai-tip-text" style={{margin:0}}>{sum.text}</p>;
           })()}
         </div>
-        <div className="divider-rule" />
         <div className="crew-tips-header">
           <div className="section-label" style={{ margin: 0 }}>
-            👥 FROM THE CREW
+            From the crew
             {tipsForCat.length > 0 && <span className="section-count"> · {tipsForCat.length}</span>}
           </div>
-          <button className="add-btn" onClick={() => onAddTip(code, activeCategory)}>+ Add tip</button>
+          <button className="add-btn" onClick={() => onAddTip(code, activeCategory)}><Icon name="plus" size={15} strokeWidth={2.2} />Add tip</button>
         </div>
         <div className="sort-filter-bar">
           <div className="sort-filter-group">
@@ -1468,9 +1541,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         </div>
         {activeCategory === "food" && (
           <div className="sort-filter-bar crew-filter-bar">
-            <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}>🌙 Jetlag Proof</button>
-            <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}>🧍 Solo friendly</button>
-            <button className={`sf-btn${filterQuickBite ? " active" : ""}`} onClick={() => setFilterQuickBite(v => !v)}>⚡ Quick bite</button>
+            <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}><Icon name="moon" size={14} />Jetlag proof</button>
+            <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}><Icon name="user" size={14} />Solo friendly</button>
+            <button className={`sf-btn${filterQuickBite ? " active" : ""}`} onClick={() => setFilterQuickBite(v => !v)}><Icon name="bolt" size={14} />Quick bite</button>
           </div>
         )}
         {tipsForCat.length === 0
@@ -1489,40 +1562,41 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                   <div className="crew-card-date">{tip.date}</div>
                 </div>
                 {tip.photo && <img className="tip-photo" src={tip.photo} alt="tip photo" />}
-                <p className="crew-card-text">{tip.text}</p>
+                <TipText text={tip.text} className="crew-card-text" />
                 {tip.tags && tip.tags.length > 0 && (
                   <div className="tip-tags-row">{tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
                 {(tip.price || tip.hours || tip.discount || (tip.category === "food" && (tip.jetlagProof || tip.soloFriendly || tip.quickBite)) || tip.visibility === "connections" || (tip.coords && hotelCoords)) && (
                   <div className="tip-meta-row">
                     {tip.price && <span className="tip-price-badge">{tip.price === "Free" ? "Free" : tip.price}</span>}
-                    {tip.hours && <span className="tip-hours-badge">🕐 {tip.hours}</span>}
-                    {tip.discount && <span className="tip-discount-badge">✂️ {tip.discount === true ? "Crew discount" : `${tip.discount} crew`}</span>}
-                    {tip.category === "food" && tip.jetlagProof && <span className="tip-jetlag-badge">🌙 Jetlag Proof</span>}
-                    {tip.category === "food" && tip.soloFriendly && <span className="tip-solo-badge">🧍 Solo friendly</span>}
-                    {tip.category === "food" && tip.quickBite && <span className="tip-quickbite-badge">⚡ Quick bite</span>}
-                    {tip.visibility === "connections" && <span className="tip-private-badge">🔒 Connections only</span>}
+                    {tip.hours && <span className="tip-hours-badge"><Icon name="clock" size={13} />{tip.hours}</span>}
+                    {tip.discount && <span className="tip-discount-badge"><Icon name="tag" size={13} />{tip.discount === true ? "Crew discount" : `${tip.discount} crew`}</span>}
+                    {tip.category === "food" && tip.jetlagProof && <span className="tip-jetlag-badge"><Icon name="moon" size={13} />Jetlag proof</span>}
+                    {tip.category === "food" && tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}
+                    {tip.category === "food" && tip.quickBite && <span className="tip-quickbite-badge"><Icon name="bolt" size={13} />Quick bite</span>}
+                    {tip.visibility === "connections" && <span className="tip-private-badge"><Icon name="lock" size={13} />Connections only</span>}
                     {tip.coords && hotelCoords && (
-                      <span className="tip-distance-badge">🏨 {fmtDistance(distanceKm({ lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) }, hotelCoords))} from crew hotel</span>
+                      <span className="tip-distance-badge"><Icon name="hotel" size={13} />{fmtDistance(distanceKm({ lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) }, hotelCoords))} from crew hotel</span>
                     )}
                   </div>
                 )}
                 <div className="tip-actions">
-                  <button className={`like-btn${tip.likedByMe ? " liked" : ""}`} onClick={() => handleLike(tip.id)}>❤ {tip.likes}</button>
-                  <a href={tipMapsUrl(tip, dest)} target="_blank" rel="noreferrer" className="maps-link">📍 Maps</a>
-                  <button className="share-btn" onClick={() => shareTip(tip, dest, () => { setCopiedTipId(tip.id); setTimeout(() => setCopiedTipId((id: any) => id === tip.id ? null : id), 1800); })}>
-                    {copiedTipId === tip.id ? "✓ Copied" : "↗ Share"}
-                  </button>
+                  <button className={`like-btn${tip.likedByMe ? " liked" : ""}`} onClick={() => handleLike(tip.id)} aria-label="Like"><Icon name="heart" size={16} />{tip.likes}</button>
                   <button
                     className={`comment-toggle-btn${isExpanded ? " active" : ""}`}
-                    onClick={() => setExpandedTip(isExpanded ? null : tip.id)}>
-                    💬 {tip.comments.length > 0 ? tip.comments.length : "Comment"}
+                    onClick={() => setExpandedTip(isExpanded ? null : tip.id)} aria-label="Comments">
+                    <Icon name="comment" size={16} />{tip.comments.length > 0 ? tip.comments.length : "Comment"}
+                  </button>
+                  <a href={tipMapsUrl(tip, dest)} target="_blank" rel="noreferrer" className="maps-link"><Icon name="pin" size={16} />Maps</a>
+                  <button className="share-btn" onClick={() => shareTip(tip, dest, () => { setCopiedTipId(tip.id); setTimeout(() => setCopiedTipId((id: any) => id === tip.id ? null : id), 1800); })}>
+                    {copiedTipId === tip.id ? <><Icon name="check" size={16} />Copied</> : <><Icon name="share" size={16} />Share</>}
                   </button>
                   <ConnectButton authorId={tip.authorId} connections={connections} className="connect-btn" />
                   <button
                     className={`fav-btn${favorites.includes(`${code}-${tip.id}`) ? " saved" : ""}`}
-                    onClick={() => onToggleFavorite(`${code}-${tip.id}`)}>
-                    {favorites.includes(`${code}-${tip.id}`) ? "★" : "☆"}
+                    onClick={() => onToggleFavorite(`${code}-${tip.id}`)}
+                    aria-label={favorites.includes(`${code}-${tip.id}`) ? "Remove from saved" : "Save"}>
+                    <Icon name="bookmark" size={18} />
                   </button>
                 </div>
 
@@ -1566,7 +1640,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                         <button className="comment-submit-btn"
                           onClick={() => handleAddComment(tip.id)}
                           disabled={!form.name?.trim() || !form.text?.trim()}>
-                          ↑
+                          <Icon name="arrowUp" size={18} strokeWidth={2.2} />
                         </button>
                       </div>
                     </div>
@@ -1758,7 +1832,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
 
   if (submitted) return (
     <div className="screen screen-center">
-      <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+      <div className="success-icon"><Icon name="checkCircle" size={56} color="#059669" strokeWidth={1.6} /></div>
       <div className="success-title">Recommendation added!</div>
       <p className="success-sub">Your tip for {dest?.city} is now visible to all WingTips crew.</p>
     </div>
@@ -1769,7 +1843,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
       {showDonation && (
         <div className="donation-backdrop">
           <div className="donation-modal">
-            <div className="donation-wings-logo">🕊️</div>
+            <div className="donation-wings-logo"><Icon name="heart" size={44} color="var(--accent)" strokeWidth={1.6} /></div>
             <div className="donation-title">Before you post…</div>
             <p className="donation-body">
               WingTips is free — and so is sharing knowledge. If this community has saved you time or money on a layover, consider leaving a small token.<br /><br />
@@ -1793,7 +1867,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
       )}
       <div className="form-header">
-        <button className="back-btn-flat" onClick={onBack}>← Cancel</button>
+        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Cancel</button>
         <div className="form-header-title">Add Recommendation</div>
       </div>
       <div className="form-body">
@@ -1801,8 +1875,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         <div className="form-group">
           <label className="form-lbl">Destination</label>
           <button type="button" className="form-sel dest-picker-trigger" onClick={() => setShowDestPicker(true)}>
-            <span>{dest ? `${dest.flag} ${dest.city}` : "— Select city —"}</span>
-            <span className="dest-picker-chevron">▼</span>
+            <span className="dest-picker-value">{dest ? <><Flag emoji={dest.flag} />{dest.city}</> : "Select city"}</span>
+            <span className="dest-picker-chevron"><Icon name="chevronDown" size={18} /></span>
           </button>
         </div>
 
@@ -1815,7 +1889,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
               <div className="dest-search-row">
                 <input className="dest-search-inp" placeholder="Search city, country or code…"
                   value={destQuery} onChange={e => setDestQuery(e.target.value)} autoComplete="off" />
-                {destQuery && <button type="button" className="dest-search-clear" onClick={() => setDestQuery("")}>✕</button>}
+                {destQuery && <button type="button" className="dest-search-clear" onClick={() => setDestQuery("")} aria-label="Clear"><Icon name="close" size={16} /></button>}
               </div>
               {destSearchResults && (
                 <div className="dest-continent-list">
@@ -1827,11 +1901,11 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
                             className={`dest-list-item${destCode === d.code ? " active" : ""}`}
                             onClick={() => { setDestCode(d.code); setPlace(""); setPlaceCoords(null); setSuggestions([]); setShowDestPicker(false); setDestQuery(""); }}>
                             <div className="dli-text">
-                              <span className="dli-city">{d.flag} {d.city}</span>
+                              <span className="dli-city"><Flag emoji={d.flag} />{d.city}</span>
                               <span className="dli-sub">{d.country}</span>
                             </div>
                             <span className="dli-code">{d.code}</span>
-                            {destCode === d.code && <span className="dli-tick">✓</span>}
+                            {destCode === d.code && <span className="dli-tick"><Icon name="check" size={16} strokeWidth={2.2} /></span>}
                           </button>
                         ))}
                       </div>
@@ -1849,14 +1923,14 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
                         <span className="continent-dot" style={{background: group.color}} />
                         <span className="continent-label">{group.continent}</span>
                         <span className="continent-count">{group.count}</span>
-                        <span className="continent-chevron">{isOpen ? "▲" : "▼"}</span>
+                        <span className="continent-chevron"><Icon name={isOpen ? "chevronUp" : "chevronDown"} size={18} /></span>
                       </button>
                       {isOpen && (
                         <div className="dest-list-inner">
                           {group.countries.map((c: any) => (
                             <div key={c.country} className="country-group">
                               <div className="country-header">
-                                <span className="country-flag-chip">{c.flag}</span>
+                                <Flag emoji={c.flag} />
                                 <span className="country-name">{c.country}</span>
                               </div>
                               {c.dests.map((d: any) => (
@@ -1867,7 +1941,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
                                     <span className="dli-city">{d.city}</span>
                                   </div>
                                   <span className="dli-code">{d.code}</span>
-                                  {destCode === d.code && <span className="dli-tick">✓</span>}
+                                  {destCode === d.code && <span className="dli-tick"><Icon name="check" size={16} strokeWidth={2.2} /></span>}
                                 </button>
                               ))}
                             </div>
@@ -1891,10 +1965,10 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
               onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
               autoComplete="off"
               style={{ flex: 1 }} />
-            {loadingSugg && <span className="sugg-spinner">⏳</span>}
+            {loadingSugg && <span className="sugg-spinner"><Icon name="loader" size={18} color="var(--accent)" className="spin" /></span>}
             {mapsUrl && (
               <a href={mapsUrl} target="_blank" rel="noreferrer" className="maps-btn">
-                🗺 Maps
+                <Icon name="map" size={16} />Maps
               </a>
             )}
           </div>
@@ -1917,7 +1991,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
             </div>
           )}
           {mapsUrl && <div className="maps-hint">Tap Maps to verify the location in Google Maps</div>}
-          {distanceToHotel && <div className="maps-hint">🏨 {distanceToHotel} from the crew hotel ({dest.crewHotel || "unknown"})</div>}
+          {distanceToHotel && <div className="maps-hint"><Icon name="hotel" size={14} />{distanceToHotel} from the crew hotel ({dest.crewHotel || "unknown"})</div>}
         </div>
 
         <div className="form-group">
@@ -1936,7 +2010,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           <input className="form-inp" placeholder="e.g. Mo-Fr 09:00-22:00, Sa-Su 10:00-23:00"
             value={openingHours} onChange={e => setOpeningHours(e.target.value)} />
           {category === "food" && jetlagProof && (
-            <div className="jetlag-detected-badge">🌙 Jetlag Proof — detected from opening hours (opens early or stays open late)</div>
+            <div className="jetlag-detected-badge"><Icon name="moon" size={14} />Jetlag proof, detected from opening hours (opens early or stays open late)</div>
           )}
         </div>
 
@@ -2001,8 +2075,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         <div className="form-group">
           <label className="form-lbl">Who can see this tip?</label>
           <div className="price-chip-row">
-            <button className={`price-chip${visibility === "public" ? " active" : ""}`} onClick={() => setVisibility("public")}>🌍 Public — everyone</button>
-            <button className={`price-chip${visibility === "connections" ? " active" : ""}`} onClick={() => setVisibility("connections")}>🔒 Connections only</button>
+            <button className={`price-chip${visibility === "public" ? " active" : ""}`} onClick={() => setVisibility("public")}><Icon name="globe" size={15} />Public, everyone</button>
+            <button className={`price-chip${visibility === "connections" ? " active" : ""}`} onClick={() => setVisibility("connections")}><Icon name="lock" size={15} />Connections only</button>
           </div>
         </div>
 
@@ -2013,6 +2087,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
               <button key={c.id}
                 className={`rec-cat-chip${category === c.id ? " active" : ""}`}
                 onClick={() => setCategory(c.id)}>
+                <CategoryIcon id={c.id} color={category === c.id ? "#fff" : c.color} size={16} />
                 {c.label}
               </button>
             ))}
@@ -2024,7 +2099,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           {photo ? (
             <div className="photo-preview-wrap">
               <img className="photo-preview" src={photo} alt="preview" />
-              <button className="photo-remove-btn" onClick={() => setPhoto(null)}>✕ Remove</button>
+              <button className="photo-remove-btn" onClick={() => setPhoto(null)}><Icon name="close" size={13} strokeWidth={2.2} />Remove</button>
             </div>
           ) : (
             <label className="photo-upload-btn">
@@ -2091,20 +2166,20 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, add
   return (
     <div className="screen">
       <div className="screen-topbar">
-        <button className="back-btn-flat" onClick={onBack}>← Back</button>
+        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>
         <div className="screen-topbar-title">Saved Tips</div>
       </div>
       {savedTips.length === 0
         ? <div className="screen-center">
-            <div style={{ fontSize: 40, marginBottom: 16 }}>☆</div>
+            <div style={{ marginBottom: 16 }}><Icon name="bookmark" size={40} color="var(--accent)" strokeWidth={1.6} /></div>
             <div style={{ color: "var(--text2)", fontSize: 14 }}>No saved tips yet.</div>
-            <div style={{ color: "var(--text2)", fontSize: 12, marginTop: 6 }}>Tap ☆ on any crew tip to save it here.</div>
+            <div style={{ color: "var(--text2)", fontSize: 12, marginTop: 6 }}>Tap the bookmark on any crew tip to save it here.</div>
           </div>
         : <div className="content-pad">
             {savedTips.map(({ key, code, dest, tip }) => (
               <div key={key} className="crew-card">
                 <button className="fav-dest-label" onClick={() => onDestClick(code)}>
-                  {dest.flag} {dest.city}
+                  <CategoryIcon id={tip.category || "other"} color={CATEGORIES.find(c => c.id === tip.category)?.color} size={15} />{dest.city}
                 </button>
                 <div className="crew-card-top" style={{ marginTop: 8 }}>
                   <div className="crew-av">{tip.name[0]}</div>
@@ -2114,8 +2189,8 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, add
                   </div>
                   <div className="crew-card-date">{tip.date}</div>
                 </div>
-                <p className="crew-card-text">{tip.text}</p>
-                <button className="fav-btn saved" onClick={() => onToggleFavorite(key)}>★ Remove</button>
+                <TipText text={tip.text} className="crew-card-text" />
+                <button className="fav-btn saved" onClick={() => onToggleFavorite(key)}><Icon name="bookmark" size={16} />Remove</button>
               </div>
             ))}
           </div>
@@ -2135,7 +2210,7 @@ function NotificationsScreen({ onBack, notes, onMarkAllRead, adminSignups, onNot
   return (
     <div className="screen">
       <div className="screen-topbar">
-        <button className="back-btn-flat" onClick={onBack}>← Back</button>
+        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>
         <div className="screen-topbar-title">Notifications</div>
       </div>
       <div className="content-pad">
@@ -2271,7 +2346,7 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
   return (
     <div className="screen">
       <div className="screen-topbar">
-        <button className="back-btn-flat" onClick={onBack}>← Back</button>
+        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>
         <div className="screen-topbar-title">My Profile</div>
         {!editing && <button className="profile-edit-btn" onClick={() => { setDraft({ ...profile }); setEditing(true); }}>Edit</button>}
       </div>
@@ -2338,9 +2413,9 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
                     const cat = CATEGORIES.find(c => c.id === t.category);
                     return (
                       <div key={i} className="my-tip-card">
-                        <div className="my-tip-meta">{t.destCity} · {cat?.label || t.category}</div>
-                        <p className="my-tip-text">{t.text}</p>
-                        <div className="my-tip-likes">❤ {t.likes || 0}</div>
+                        <div className="my-tip-meta"><CategoryIcon id={t.category || "other"} color={cat?.color} size={15} />{t.destCity} · {cat?.label || t.category}</div>
+                        <TipText text={t.text} className="my-tip-text" />
+                        <div className="my-tip-likes"><Icon name="heart" size={14} />{t.likes || 0}</div>
                       </div>
                     );
                   })
@@ -2442,7 +2517,7 @@ function CrewProfileScreen({ crew, onBack, connections, addedTips }) {
   return (
     <div className="screen">
       <div className="screen-topbar">
-        <button className="back-btn-flat" onClick={onBack}>← Back</button>
+        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>
         <div className="screen-topbar-title">Crew Profile</div>
       </div>
       <div className="profile-hero">
@@ -2463,9 +2538,9 @@ function CrewProfileScreen({ crew, onBack, connections, addedTips }) {
               const cat = CATEGORIES.find(c => c.id === t.category);
               return (
                 <div key={i} className="my-tip-card">
-                  <div className="my-tip-meta">{t.destFlag} {t.destCity} · {cat?.label || t.category}</div>
-                  <p className="my-tip-text">{t.text}</p>
-                  <div className="my-tip-likes">❤ {t.likes || 0}</div>
+                  <div className="my-tip-meta"><CategoryIcon id={t.category || "other"} color={cat?.color} size={15} />{t.destCity} · {cat?.label || t.category}</div>
+                  <TipText text={t.text} className="my-tip-text" />
+                  <div className="my-tip-likes"><Icon name="heart" size={14} />{t.likes || 0}</div>
                 </div>
               );
             })
@@ -2497,7 +2572,7 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
         <div className="dest-search-row">
           <input className="dest-search-inp" placeholder="Search city, country or code…"
             value={query} onChange={e => setQuery(e.target.value)} autoComplete="off" />
-          {query && <button className="dest-search-clear" onClick={() => setQuery("")}>✕</button>}
+          {query && <button className="dest-search-clear" onClick={() => setQuery("")} aria-label="Clear"><Icon name="close" size={16} /></button>}
         </div>
         {searchResults && (
           <div className="dest-continent-list">
@@ -2509,11 +2584,11 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
                       className={`dest-list-item${selectedDest === d.code ? " active" : ""}`}
                       onClick={() => { onSelect(d.code); onClose(); }}>
                       <div className="dli-text">
-                        <span className="dli-city">{d.flag} {d.city}</span>
+                        <span className="dli-city"><Flag emoji={d.flag} />{d.city}</span>
                         <span className="dli-sub">{d.country}</span>
                       </div>
                       <span className="dli-code">{d.code}</span>
-                      {selectedDest === d.code && <span className="dli-tick">✓</span>}
+                      {selectedDest === d.code && <span className="dli-tick"><Icon name="check" size={16} strokeWidth={2.2} /></span>}
                     </button>
                   ))}
                 </div>
@@ -2531,14 +2606,14 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
                   <span className="continent-dot" style={{background: group.color}} />
                   <span className="continent-label">{group.continent}</span>
                   <span className="continent-count">{group.count}</span>
-                  <span className="continent-chevron">{isOpen ? "▲" : "▼"}</span>
+                  <span className="continent-chevron"><Icon name={isOpen ? "chevronUp" : "chevronDown"} size={18} /></span>
                 </button>
                 {isOpen && (
                   <div className="dest-list-inner">
                     {group.countries.map((c: any) => (
                       <div key={c.country} className="country-group">
                         <div className="country-header">
-                          <span className="country-flag-chip">{c.flag}</span>
+                          <Flag emoji={c.flag} />
                           <span className="country-name">{c.country}</span>
                         </div>
                         {c.dests.map((d: any) => (
@@ -2549,7 +2624,7 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
                               <span className="dli-city">{d.city}</span>
                             </div>
                             <span className="dli-code">{d.code}</span>
-                            {selectedDest === d.code && <span className="dli-tick">✓</span>}
+                            {selectedDest === d.code && <span className="dli-tick"><Icon name="check" size={16} strokeWidth={2.2} /></span>}
                           </button>
                         ))}
                       </div>
@@ -2594,7 +2669,7 @@ function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips, ti
                 <span className="cat-menu-icon"><CategoryIcon id={cat.id} color={cat.color} size={22} /></span>
                 <span className="cat-menu-label">{cat.label}</span>
                 {count > 0 && <span className="cat-menu-badge">{count} crew tips</span>}
-                {isActive && <span className="cat-menu-tick">✓</span>}
+                {isActive && <span className="cat-menu-tick"><Icon name="check" size={18} strokeWidth={2.2} /></span>}
               </button>
             );
           })}
@@ -2627,16 +2702,16 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
   return (
     <div className="screen">
       <div className="screen-topbar">
-        <button className="back-btn-flat" onClick={onBack}>← Back</button>
+        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>
         <div className="screen-topbar-title"><CategoryIcon id={cat?.id || "other"} color={cat?.color} size={18} />{cat?.label}</div>
       </div>
       <div className="content-pad">
         <div className="search-results-meta">{filteredResults.length} recent tip{filteredResults.length !== 1 ? "s" : ""}, every destination mixed together</div>
         {isFood && (
           <div className="sort-filter-bar crew-filter-bar">
-            <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}>🌙 Jetlag Proof</button>
-            <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}>🧍 Solo friendly</button>
-            <button className={`sf-btn${filterQuickBite ? " active" : ""}`} onClick={() => setFilterQuickBite(v => !v)}>⚡ Quick bite</button>
+            <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}><Icon name="moon" size={14} />Jetlag proof</button>
+            <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}><Icon name="user" size={14} />Solo friendly</button>
+            <button className={`sf-btn${filterQuickBite ? " active" : ""}`} onClick={() => setFilterQuickBite(v => !v)}><Icon name="bolt" size={14} />Quick bite</button>
           </div>
         )}
         {filteredResults.length === 0
@@ -2644,7 +2719,7 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
           : filteredResults.map((r, i) => (
             <div key={i} className="search-result-item">
               <button className="search-result-dest" onClick={() => onDestClick(r.destCode)}>
-                {(DESTINATIONS as any)[r.destCode]?.flag} {r.destCity} · {r.destCode}
+                <Flag emoji={(DESTINATIONS as any)[r.destCode]?.flag} />{r.destCity} · {r.destCode}
               </button>
               <button className="crew-card search-result-card" onClick={() => onTipClick(r.destCode, r.tip.id, r.tip.category)}>
                 <div className="crew-card-top">
@@ -2655,19 +2730,19 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
                   </div>
                   <div className="crew-card-date">{r.tip.date}</div>
                 </div>
-                <p className="crew-card-text">{r.tip.text}</p>
+                <TipText text={r.tip.text} className="crew-card-text" />
                 {r.tip.tags && r.tip.tags.length > 0 && (
                   <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
                 {((isFood && (r.tip.jetlagProof || r.tip.soloFriendly || r.tip.quickBite)) || r.tip.visibility === "connections") && (
                   <div className="tip-meta-row">
-                    {isFood && r.tip.jetlagProof && <span className="tip-jetlag-badge">🌙 Jetlag Proof</span>}
-                    {isFood && r.tip.soloFriendly && <span className="tip-solo-badge">🧍 Solo friendly</span>}
-                    {isFood && r.tip.quickBite && <span className="tip-quickbite-badge">⚡ Quick bite</span>}
-                    {r.tip.visibility === "connections" && <span className="tip-private-badge">🔒 Connections only</span>}
+                    {isFood && r.tip.jetlagProof && <span className="tip-jetlag-badge"><Icon name="moon" size={13} />Jetlag proof</span>}
+                    {isFood && r.tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}
+                    {isFood && r.tip.quickBite && <span className="tip-quickbite-badge"><Icon name="bolt" size={13} />Quick bite</span>}
+                    {r.tip.visibility === "connections" && <span className="tip-private-badge"><Icon name="lock" size={13} />Connections only</span>}
                   </div>
                 )}
-                <div className="search-result-cta">View recommendation →</div>
+                <div className="search-result-cta">View recommendation<Icon name="chevronRight" size={14} strokeWidth={2.2} /></div>
               </button>
             </div>
           ))
@@ -2706,7 +2781,7 @@ function SearchResultsScreen({ query, addedTips, onDestClick, onBack, onTipClick
   return (
     <div className="screen">
       <div className="screen-topbar">
-        <button className="back-btn-flat" onClick={onBack}>← Back</button>
+        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>
         <div className="screen-topbar-title">Search results</div>
       </div>
       <div className="content-pad">
@@ -2716,14 +2791,15 @@ function SearchResultsScreen({ query, addedTips, onDestClick, onBack, onTipClick
           : results.map((r, i) => (
             <div key={i} className="search-result-item">
               <button className="search-result-dest" onClick={() => onDestClick(r.destCode)}>
-                {(DESTINATIONS as any)[r.destCode]?.flag} {r.destCity} · {r.destCode}
+                <Flag emoji={(DESTINATIONS as any)[r.destCode]?.flag} />{r.destCity} · {r.destCode}
               </button>
               <button className="crew-card search-result-card" onClick={() => onTipClick(r.destCode, r.tip.id, r.tip.category)}>
-                <p className="crew-card-text">{r.tip.text}</p>
+                <div className="tip-cat-line"><CategoryIcon id={r.tip.category || "other"} color={CATEGORIES.find(c => c.id === r.tip.category)?.color} size={15} />{CATEGORIES.find(c => c.id === r.tip.category)?.label || r.tip.category}</div>
+                <TipText text={r.tip.text} className="crew-card-text" />
                 {r.tip.tags && r.tip.tags.length > 0 && (
                   <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                <div className="search-result-cta">View recommendation →</div>
+                <div className="search-result-cta">View recommendation<Icon name="chevronRight" size={14} strokeWidth={2.2} /></div>
               </button>
             </div>
           ))
@@ -2739,7 +2815,7 @@ function LandingScreen({ onGetStarted, onSignIn }: { onGetStarted: () => void; o
   return (
     <div className="landing-screen">
       <div className="landing-hero">
-        <div className="landing-logo">✈ WingTips</div>
+        <div className="landing-logo">Wing<span>Tips</span></div>
         <div className="landing-badge">KLM crew only</div>
         <h1 className="landing-headline">Know before you land.</h1>
         <p className="landing-sub">The layover guide written by crew, for crew — {destCount} destinations, zero guesswork.</p>
@@ -2749,17 +2825,17 @@ function LandingScreen({ onGetStarted, onSignIn }: { onGetStarted: () => void; o
 
       <div className="landing-features">
         <div className="landing-feature">
-          <div className="landing-feature-icon">🌍</div>
+          <div className="landing-feature-icon"><Icon name="globe" size={24} /></div>
           <div className="landing-feature-title">{destCount} destinations, and counting</div>
           <div className="landing-feature-text">From Aberdeen to Tokyo — crew hotel rates, local weather, and exactly how many hours you've got on the ground.</div>
         </div>
         <div className="landing-feature">
-          <div className="landing-feature-icon">🍽️</div>
+          <div className="landing-feature-icon"><CategoryIcon id="food" size={24} /></div>
           <div className="landing-feature-title">Tips you can actually trust</div>
           <div className="landing-feature-text">Food, fitness, beauty, wellness and shopping — recommended by colleagues who were really there, not a travel blog.</div>
         </div>
         <div className="landing-feature">
-          <div className="landing-feature-icon">🤝</div>
+          <div className="landing-feature-icon"><Icon name="users" size={24} /></div>
           <div className="landing-feature-title">Connect with crew</div>
           <div className="landing-feature-text">Save contacts, see who's been where, and build your own layover network.</div>
         </div>
@@ -2821,10 +2897,10 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
   if (forgotScreen) return (
     <div className="app-shell">
       <div className="auth-screen">
-        <div className="auth-logo">✈ WingTips</div>
+        <div className="auth-logo">Wing<span>Tips</span></div>
         {forgotSent ? (
           <>
-            <div className="auth-verify-icon">📧</div>
+            <div className="auth-verify-icon"><Icon name="mail" size={48} color="var(--accent)" strokeWidth={1.6} /></div>
             <div className="auth-title">Check your inbox</div>
             <div className="auth-subtitle">If an account exists for <strong>{email}</strong>, a reset link is on its way.</div>
           </>
@@ -2847,8 +2923,8 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
   if (verifyScreen) return (
     <div className="app-shell">
       <div className="auth-screen">
-        <div className="auth-logo">✈ WingTips</div>
-        <div className="auth-verify-icon">📧</div>
+        <div className="auth-logo">Wing<span>Tips</span></div>
+        <div className="auth-verify-icon"><Icon name="mail" size={48} color="var(--accent)" strokeWidth={1.6} /></div>
         <div className="auth-title">Check your inbox</div>
         <div className="auth-subtitle">We sent a verification link to <strong>{email}</strong>. Click it to activate your account, then come back and sign in.</div>
         <button className="auth-link-btn" onClick={resendVerification}>Resend email</button>
@@ -2861,8 +2937,8 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
   return (
     <div className="app-shell">
       <div className="auth-screen">
-        {onBack && <button className="auth-back-btn" onClick={onBack}>← Back</button>}
-        <div className="auth-logo">✈ WingTips</div>
+        {onBack && <button className="auth-back-btn" onClick={onBack}><Icon name="back" size={18} />Back</button>}
+        <div className="auth-logo">Wing<span>Tips</span></div>
         <div className="auth-title">{tab === "signin" ? "Welcome back" : "Create account"}</div>
         <div className="auth-subtitle">KLM crew only — use your @klm.com address</div>
         <div className="auth-tabs">
@@ -2905,7 +2981,7 @@ function ResetPasswordScreen({ onDone }: { onDone: () => void }) {
   return (
     <div className="app-shell">
       <div className="auth-screen">
-        <div className="auth-logo">✈ WingTips</div>
+        <div className="auth-logo">Wing<span>Tips</span></div>
         <div className="auth-title">Set a new password</div>
         <div className="auth-subtitle">Choose a new password for your account.</div>
         <div className="auth-form">
@@ -2936,7 +3012,7 @@ export default function WingTipsApp() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
-  if (authUser === "loading") return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)",fontSize:24}}>✈</div></div>;
+  if (authUser === "loading") return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)"}}><Icon name="loader" size={28} className="spin" /></div></div>;
   if (showResetPassword && authUser) return <ResetPasswordScreen onDone={() => setShowResetPassword(false)} />;
   if (!authUser) {
     if (authView === "landing") return <LandingScreen onGetStarted={() => setAuthView("signup")} onSignIn={() => setAuthView("signin")} />;
@@ -3026,24 +3102,24 @@ function AppContent() {
   }, [profileLoaded, recsLoaded]);
 
   if (!profileLoaded || !recsLoaded) {
-    return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)",fontSize:24}}>✈</div></div>;
+    return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)"}}><Icon name="loader" size={28} className="spin" /></div></div>;
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column", fontFamily: "'Inter', sans-serif", color: "var(--text)", maxWidth: 480, margin: "0 auto", position: "relative" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column", color: "var(--text)", maxWidth: 480, margin: "0 auto", position: "relative" }}>
       {/* TOP NAV */}
       <div className="top-nav" ref={topNavRef}>
-        <button className="nav-title" onClick={() => { setScreen("home"); setShowCatMenu(false); setShowDestMenu(false); }}>WingTips</button>
+        <button className="nav-title" onClick={() => { setScreen("home"); setShowCatMenu(false); setShowDestMenu(false); }}>Wing<span>Tips</span></button>
         <div className="nav-right">
-          <button className="nav-icon-btn" onClick={() => { setScreen("notifications"); setShowCatMenu(false); setShowDestMenu(false); }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <button className="nav-icon-btn" aria-label="Notifications" onClick={() => { setScreen("notifications"); setShowCatMenu(false); setShowDestMenu(false); }}>
+            <Icon name="bell" size={20} />
             {unreadCount > 0 && <div className="notif-badge">{unreadCount}</div>}
           </button>
           <button className="nav-icon-btn" aria-label="Profile" onClick={() => { setScreen("profile"); setShowCatMenu(false); setShowDestMenu(false); }}>
             <div className="nav-avatar">{profile.name ? profile.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() : "?"}</div>
           </button>
           <button className="nav-icon-btn" aria-label="Log out" onClick={() => { if (confirm("Log out?")) supabase.auth.signOut(); }}>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <Icon name="logout" size={19} />
           </button>
         </div>
       </div>
@@ -3084,23 +3160,23 @@ function AppContent() {
       </div>
 
       {/* BOTTOM NAV */}
-      <div className="bottom-nav">
+      <nav className="bottom-nav" aria-label="Main">
         <button className={`bnav-item${screen === "home" ? " active" : ""}`} onClick={() => { setScreen("home"); setShowCatMenu(false); setShowDestMenu(false); }}>
-          Home
+          <Icon name="home" size={22} />Home
         </button>
         <button className={`bnav-item${showDestMenu ? " active" : ""}`} onClick={() => { setShowDestMenu(v => !v); setShowCatMenu(false); }}>
-          Explore
+          <Icon name="compass" size={22} />Explore
         </button>
         <div className="bnav-fab-wrap">
-          <button className="bnav-fab" onClick={() => { setAddTipContext({ code: null, category: null }); setScreen("addrecommendation"); setShowCatMenu(false); setShowDestMenu(false); }}>+</button>
+          <button className="bnav-fab" aria-label="Add tip" onClick={() => { setAddTipContext({ code: null, category: null }); setScreen("addrecommendation"); setShowCatMenu(false); setShowDestMenu(false); }}><Icon name="plus" size={26} strokeWidth={2.2} /></button>
         </div>
         <button className={`bnav-item${showCatMenu || screen === "categoryfeed" ? " active" : ""}`} onClick={() => { setShowCatMenu(v => !v); setShowDestMenu(false); }}>
-          Categories
+          <Icon name="grid" size={22} />Categories
         </button>
         <button className={`bnav-item${screen === "favorites" ? " active" : ""}`} onClick={() => { setScreen("favorites"); setShowCatMenu(false); setShowDestMenu(false); }}>
-          Saved {unseenFavorites > 0 && <span className="bnav-badge">{unseenFavorites}</span>}
+          <span className="bnav-icon-wrap"><Icon name="bookmark" size={22} />{unseenFavorites > 0 && <span className="bnav-badge">{unseenFavorites}</span>}</span>Saved
         </button>
-      </div>
+      </nav>
     </div>
   );
 }
