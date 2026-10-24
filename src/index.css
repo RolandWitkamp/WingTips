@@ -202,15 +202,15 @@
         .top-tip-author { display:flex; align-items:center; font-size:13px; color:var(--text2); font-weight:600; }
         .top-tip-likes { margin-left:auto; display:inline-flex; align-items:center; gap:4px; }
 
-        .dest-hero { padding:16px 20px 4px; position:relative; display:flex; flex-direction:column; gap:4px; }
-        .back-btn { width:40px; height:40px; border-radius:20px; background:var(--surface); border:none; box-shadow:var(--shadow-sm); color:var(--navy); cursor:pointer; display:flex; align-items:center; justify-content:center; margin-bottom:14px; }
+        .dest-hero { padding:16px 20px 4px; position:relative; display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px; }
+        .back-btn { width:40px; height:40px; border-radius:20px; background:var(--surface); border:none; box-shadow:var(--shadow-sm); color:var(--navy); cursor:pointer; display:flex; align-items:center; justify-content:center; margin-bottom:6px; align-self:flex-start; }
         .back-btn:active { background:var(--surface2); }
 
 
         .dest-flag-big { width:20px; height:14px; object-fit:cover; border-radius:3px; display:block; box-shadow:0 0 0 1px rgba(16,35,63,0.08); }
         .dest-hero-name { font-size:36px; font-weight:800; color:var(--navy); letter-spacing:-1px; line-height:1.1; }
         .dest-hero-country { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:var(--text2); }
-        .dest-meta-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+        .dest-meta-row { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:12px; }
         .dest-meta-chip { display:inline-flex; align-items:center; gap:6px; height:36px; max-width:100%; background:var(--surface); border:none; border-radius:18px; padding:0 14px; font-size:13px; font-weight:600; color:var(--text); box-shadow:var(--shadow-sm); font-variant-numeric:tabular-nums; }
         .dest-meta-sub { color:var(--text2); font-weight:500; }
         .dest-meta-chip-btn { cursor:pointer; font-family:inherit; }
