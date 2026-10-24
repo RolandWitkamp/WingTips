@@ -13,9 +13,11 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.13.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
+type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
+const forecastCache: Record<string, { days: ForecastDay[]; ts: number }> = {};
 const cityCenterCache: Record<string, { lat: number; lng: number }> = {};
 async function geocodeCity(city: string, country: string): Promise<{ lat: number; lng: number } | null> {
   const key = `${city},${country}`;
@@ -233,6 +235,56 @@ function useWeather(code: string, city: string, country: string) {
       .catch(() => {});
   }, [code, city, country]);
   return weather;
+}
+
+function weatherEmoji(main: string): string {
+  const m = (main || "").toLowerCase();
+  if (m.includes("thunderstorm")) return "⛈️";
+  if (m.includes("snow")) return "❄️";
+  if (m.includes("rain") || m.includes("drizzle")) return "🌧️";
+  if (m.includes("cloud")) return "☁️";
+  if (m.includes("mist") || m.includes("fog") || m.includes("haze")) return "🌫️";
+  if (m.includes("clear")) return "☀️";
+  return "🌡️";
+}
+
+// Only fetched when the weather overlay is actually opened (enabled), not on every destination
+// page load -- the 5-day/3-hour forecast endpoint is a separate call from the current-weather one
+// already used elsewhere, no need to spend that request unless someone actually wants to see it.
+function useWeatherForecast(code: string, city: string, country: string, enabled: boolean) {
+  const [forecast, setForecast] = useState<ForecastDay[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!enabled || !WEATHER_API_KEY) return;
+    const cached = forecastCache[code];
+    if (cached && Date.now() - cached.ts < 60 * 60 * 1000) { setForecast(cached.days); return; }
+    setLoading(true);
+    fetch(`https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)},${encodeURIComponent(country)}&appid=${WEATHER_API_KEY}&units=metric`)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.list) { setLoading(false); return; }
+        const byDate: Record<string, any[]> = {};
+        for (const entry of d.list) (byDate[entry.dt_txt.slice(0, 10)] ||= []).push(entry);
+        const days: ForecastDay[] = Object.entries(byDate).slice(0, 6).map(([date, entries]) => {
+          const temps = entries.map((e: any) => e.main.temp);
+          // The entry closest to midday is the most representative icon/description for the day.
+          const midday = entries.reduce((best: any, e: any) =>
+            Math.abs(Number(e.dt_txt.slice(11, 13)) - 13) < Math.abs(Number(best.dt_txt.slice(11, 13)) - 13) ? e : best, entries[0]);
+          return {
+            date,
+            min: Math.round(Math.min(...temps)),
+            max: Math.round(Math.max(...temps)),
+            main: midday.weather[0].main,
+            desc: midday.weather[0].description.replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          };
+        });
+        forecastCache[code] = { days, ts: Date.now() };
+        setForecast(days);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [code, city, country, enabled]);
+  return { forecast, loading };
 }
 
 // Profile, favorites, connections and recently-visited destinations all used to live only in
@@ -860,6 +912,7 @@ const CATEGORIES = [
   { id: "accommodation", label: "Accommodation",   icon: "🏨", color: "#0EA5E9" },
   { id: "working",       label: "Working",         icon: "💻", color: "#64748B" },
   { id: "gems",          label: "Hidden Gems",     icon: "💎", color: "#D946EF" },
+  { id: "rentalcar",     label: "Rental Car",      icon: "🚗", color: "#F59E0B" },
   { id: "other",         label: "Other",           icon: "📌", color: "#78716C" },
 ];
 
@@ -1033,6 +1086,8 @@ function ConnectButton({ authorId, connections, className }: any) {
 function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment }) {
   const dest = DESTINATIONS[code];
   const liveWeather = useWeather(code, dest.city, dest.country);
+  const [showWeather, setShowWeather] = useState(false);
+  const { forecast, loading: forecastLoading } = useWeatherForecast(code, dest.city, dest.country, showWeather);
   const [crewTips, setCrewTips] = useState(
     [...dest.crewTips, ...(extraTips || [])].map(t => ({ ...t, comments: t.comments || [] }))
   );
@@ -1208,6 +1263,36 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
 
   return (
     <div className="screen">
+      {showWeather && (
+        <div className="map-overlay">
+          <div className="map-header">
+            <div className="map-header-title">{dest.city} — weather</div>
+            <button className="map-close-btn" onClick={() => setShowWeather(false)}>✕ Close</button>
+          </div>
+          <div className="weather-overlay-body">
+            <div className="weather-today">
+              <div className="weather-today-emoji">{weatherEmoji(forecast?.[0]?.main || "")}</div>
+              <div className="weather-today-temp">{liveWeather ?? dest.weather}</div>
+              <div className="weather-today-label">Right now</div>
+            </div>
+            {!WEATHER_API_KEY && <div className="no-tips">Live forecast isn't set up for this app.</div>}
+            {!!WEATHER_API_KEY && forecastLoading && <div className="no-tips">Loading forecast…</div>}
+            {!!WEATHER_API_KEY && !forecastLoading && !forecast && <div className="no-tips">Couldn't load the forecast right now.</div>}
+            {forecast && forecast.length > 0 && (
+              <div className="forecast-list">
+                {forecast.map(day => (
+                  <div key={day.date} className="forecast-day">
+                    <div className="forecast-day-date">{new Date(day.date).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</div>
+                    <div className="forecast-day-emoji">{weatherEmoji(day.main)}</div>
+                    <div className="forecast-day-desc">{day.desc}</div>
+                    <div className="forecast-day-temps"><b>{day.max}°</b> / {day.min}°</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {showMap && (
         <div className="map-overlay">
           <div className="map-header">
@@ -1254,7 +1339,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           return (
             <>
               <div className="dest-meta-row">
-                <span className="dest-meta-chip">🌡 {liveWeather ?? dest.weather}</span>
+                <button className="dest-meta-chip dest-meta-chip-btn" onClick={() => setShowWeather(true)}>🌡 {liveWeather ?? dest.weather}</button>
                 <span className="dest-meta-chip">🕐 {fmtTime(offset)}</span>
                 <span className="dest-meta-chip">✈️ {diffStr}</span>
               </div>
