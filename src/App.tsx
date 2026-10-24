@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.15.2";
+const APP_VERSION = "1.16.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -176,6 +176,117 @@ function jetlagProofFromOsmHours(osm: string | undefined): boolean {
   }
   return false;
 }
+// Stored hours come in three shapes: Google weekday_text in the phone's language ("maandag:
+// 12:00–16:00; dinsdag: …", "Monday: 9:00 AM – 5:00 PM"), our condensed form ("Mon–Thu 12:00–4:00
+// PM · Fri …") and OSM syntax ("Mo-Fr 09:00-22:00"). Parsed into per-weekday minute ranges
+// (0 = Monday, end may pass 1440 for after-midnight closing). Anything unrecognised returns
+// null so no open/closed dot is shown rather than a wrong one.
+type WeekSchedule = [number, number][][];
+const DAY_PREFIXES = [["mo", "ma"], ["tu", "di"], ["we", "wo"], ["th", "do"], ["fr", "vr"], ["sa", "za"], ["su", "zo"]];
+function dayIndex(token: string): number {
+  const k = token.trim().toLowerCase().slice(0, 2);
+  return DAY_PREFIXES.findIndex(d => d.includes(k));
+}
+function parseDaySpec(spec: string): number[] | null {
+  const clean = spec.trim().replace(/:$/, "").trim();
+  if (!clean) return [0, 1, 2, 3, 4, 5, 6];
+  const days = new Set<number>();
+  for (const part of clean.split(",")) {
+    const range = part.trim().split(/\s*[-–—]\s*/);
+    if (range.length === 1) {
+      const i = dayIndex(range[0]);
+      if (i < 0) return null;
+      days.add(i);
+    } else if (range.length === 2) {
+      const a = dayIndex(range[0]), b = dayIndex(range[1]);
+      if (a < 0 || b < 0) return null;
+      for (let i = a; ; i = (i + 1) % 7) { days.add(i); if (i === b) break; }
+    } else return null;
+  }
+  return [...days];
+}
+function clockToMinutes(h: string, m: string | undefined, ap: string | undefined): number {
+  let hour = parseInt(h, 10);
+  if (ap?.startsWith("p") && hour < 12) hour += 12;
+  if (ap?.startsWith("a") && hour === 12) hour = 0;
+  return hour * 60 + (m ? parseInt(m, 10) : 0);
+}
+function parseHoursPart(text: string): [number, number][] | null {
+  const t = text.trim().toLowerCase();
+  if (/^(closed|gesloten|off)$/.test(t)) return [];
+  if (/24\s*(hours|uur)|^24\/7$/.test(t)) return [[0, 1440]];
+  const out: [number, number][] = [];
+  for (const range of t.split(",")) {
+    const m = range.match(/^\s*(\d{1,2})(?:[:.](\d{2}))?\s*([ap]\.?m\.?)?\s*[-–—]\s*(\d{1,2})(?:[:.](\d{2}))?\s*([ap]\.?m\.?)?\s*$/);
+    if (!m) return null;
+    const startAp = m[3] || m[6];
+    const start = clockToMinutes(m[1], m[2], startAp);
+    const rawEnd = clockToMinutes(m[4], m[5], m[6]);
+    out.push([start, rawEnd <= start ? rawEnd + 1440 : rawEnd]);
+  }
+  return out;
+}
+function parseOpeningHours(text: string | undefined): WeekSchedule | null {
+  if (!text) return null;
+  const norm = text.replace(/[   ]/g, " ").replace(/(\d|[ap]\.?m\.?)\s*,\s*(?=[a-z])/gi, "$1;").trim();
+  if (/^24\/7$/.test(norm)) return Array.from({ length: 7 }, () => [[0, 1440]] as [number, number][]);
+  const week: WeekSchedule = Array.from({ length: 7 }, () => []);
+  let parsed = false;
+  for (const group of norm.split(/\s*[;·\n]\s*/)) {
+    if (!group) continue;
+    const at = group.search(/\d|closed|gesloten|open 24|24 uur/i);
+    if (at < 0) return null;
+    const days = parseDaySpec(group.slice(0, at));
+    const ranges = parseHoursPart(group.slice(at));
+    if (!days || !ranges) return null;
+    for (const d of days) week[d] = ranges;
+    parsed = true;
+  }
+  return parsed ? week : null;
+}
+function openStatus(week: WeekSchedule, day: number, minutes: number): { open: boolean; label: string } {
+  const today = week[day];
+  if (today.some(([s, e]) => s === 0 && e >= 1440)) return { open: true, label: "Open 24 hours" };
+  const yesterday = week[(day + 6) % 7];
+  const spill = yesterday.find(([, e]) => e > 1440 && minutes < e - 1440);
+  if (spill) return { open: true, label: `Open until ${fmtMinutes(spill[1])}` };
+  const now = today.find(([s, e]) => minutes >= s && minutes < e);
+  if (now) return { open: true, label: `Open until ${fmtMinutes(now[1])}` };
+  const later = today.filter(([s]) => s > minutes).sort((a, b) => a[0] - b[0])[0];
+  if (later) return { open: false, label: `Closed · opens ${fmtMinutes(later[0])}` };
+  for (let i = 1; i <= 7; i++) {
+    const next = [...week[(day + i) % 7]].sort((a, b) => a[0] - b[0])[0];
+    if (next) return { open: false, label: `Closed · opens ${i === 1 ? "tomorrow" : WEEKDAYS_EN[(day + i) % 7]} ${fmtMinutes(next[0])}` };
+  }
+  return { open: false, label: "Closed" };
+}
+function todayHoursLabel(week: WeekSchedule, day: number): string {
+  const ranges = week[day];
+  if (!ranges.length) return "Today closed";
+  if (ranges.some(([s, e]) => s === 0 && e >= 1440)) return "Today open 24 hours";
+  return `Today ${ranges.map(([s, e]) => `${fmtMinutes(s)}–${fmtMinutes(e)}`).join(", ")}`;
+}
+function useMinuteTick() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+}
+function TipHoursBadges({ hours, code }: { hours: string; code: string }) {
+  useMinuteTick();
+  const week = parseOpeningHours(hours);
+  if (!week) return <span className="tip-hours-badge"><Icon name="clock" size={13} />{hours}</span>;
+  const { day, minutes } = destLocalNow(code);
+  const status = openStatus(week, day, minutes);
+  return (
+    <>
+      <span className={`tip-open-badge ${status.open ? "is-open" : "is-closed"}`}><span className="open-dot" />{status.label}</span>
+      <span className="tip-hours-badge"><Icon name="clock" size={13} />{todayHoursLabel(week, day)}</span>
+    </>
+  );
+}
+
 function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371;
   const dLat = (b.lat - a.lat) * Math.PI / 180;
@@ -1157,7 +1268,8 @@ const TZ_OFFSETS: Record<string, number> = {
   // North America EDT -4
   JFK:-4,ATL:-4,BOS:-4,DTW:-4,IAD:-4,MIA:-4,YUL:-4,YYZ:-4,
   // North America CDT -5
-  IAH:-5,AUS:-5,ORD:-5,MSP:-5,MEX:-5,
+  IAH:-5,AUS:-5,ORD:-5,MSP:-5,
+  MEX:-6,
   // North America MDT -6
   SLC:-6,YEG:-6,YYC:-6,
   // North America PDT -7
@@ -1186,11 +1298,63 @@ function Flag({ emoji }: { emoji?: string }) {
   return <img className="flag-mini" src={`https://flagcdn.com/${flagToCode(emoji)}.svg`} alt="" loading="lazy" />;
 }
 
-function fmtTime(utcOffset: number) {
-  const now = new Date();
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  const d = new Date(utcMs + utcOffset * 3600000);
-  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+// Real IANA zones so local time (and the open/closed dot) follows each country's own DST switch;
+// TZ_OFFSETS stays as the fallback for any code missing here.
+const TZ_ZONE_GROUPS: Record<string, string> = {
+  "Europe/Amsterdam": "AMS", "Europe/Vienna": "VIE", "Europe/Brussels": "BRU", "Europe/Zurich": "GVA ZRH BSL",
+  "Europe/Copenhagen": "CPH BLL AAL", "Europe/Stockholm": "ARN GOT LPI", "Europe/Oslo": "OSL AES SVG KRS TRD",
+  "Europe/Warsaw": "WAW GDN POZ KRK WRO", "Europe/Prague": "PRG", "Europe/Budapest": "BUD",
+  "Europe/Madrid": "BCN MAD BIO VLC", "Europe/Rome": "FCO MXP BLQ FLR TRN", "Europe/Belgrade": "BEG",
+  "Europe/Ljubljana": "LJU", "Europe/Zagreb": "ZAG DBV", "Europe/Skopje": "SKP",
+  "Europe/Berlin": "BER DUS FRA HAJ HAM BRE MUC NUE STR", "Europe/Luxembourg": "LUX", "Europe/Paris": "NTE TLS",
+  "Europe/London": "LHR MAN ABZ BHD BHX BRS CWL EDI EXT GLA HUY INV LBA MME NCL NWI SOU LCY",
+  "Europe/Dublin": "ORK DUB", "Europe/Lisbon": "LIS", "Europe/Helsinki": "HEL",
+  "America/New_York": "JFK ATL BOS IAD MIA", "America/Detroit": "DTW", "America/Toronto": "YUL YYZ",
+  "America/Chicago": "IAH AUS ORD MSP", "America/Mexico_City": "MEX", "America/Denver": "SLC",
+  "America/Edmonton": "YEG YYC", "America/Los_Angeles": "LAS LAX PDX SAN SFO", "America/Vancouver": "YVR",
+  "America/Sao_Paulo": "GRU GIG", "America/Argentina/Buenos_Aires": "EZE", "America/Paramaribo": "PBM",
+  "America/Guyana": "GEO", "America/Santiago": "SCL", "America/Curacao": "CUR", "America/Aruba": "AUA",
+  "America/Kralendijk": "BON", "America/Lower_Princes": "SXM", "America/Port_of_Spain": "POS",
+  "America/Lima": "LIM", "America/Bogota": "BOG CTG", "America/Panama": "PTY", "America/Guayaquil": "GYE UIO",
+  "America/Costa_Rica": "SJO", "Asia/Dubai": "DXB", "Asia/Riyadh": "RUH DMM", "Africa/Nairobi": "NBO",
+  "Africa/Dar_es_Salaam": "JRO DAR", "Africa/Kampala": "EBB", "Africa/Johannesburg": "JNB CPT",
+  "Africa/Kigali": "KGL", "Africa/Lagos": "LOS", "Africa/Accra": "ACC", "Asia/Tokyo": "NRT KIX",
+  "Asia/Seoul": "ICN", "Asia/Taipei": "TPE", "Asia/Singapore": "SIN", "Asia/Kuala_Lumpur": "KUL",
+  "Asia/Makassar": "DPS", "Asia/Manila": "MNL", "Asia/Hong_Kong": "HKG", "Asia/Shanghai": "PVG PEK",
+  "Asia/Bangkok": "BKK", "Asia/Jakarta": "CGK", "Asia/Kolkata": "DEL BOM HYD BLR", "Australia/Sydney": "SYD",
+};
+const TZ_ZONES: Record<string, string> = Object.fromEntries(
+  Object.entries(TZ_ZONE_GROUPS).flatMap(([zone, codes]) => codes.split(" ").map(c => [c, zone]))
+);
+const WEEKDAYS_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function zonedParts(zone: string, date: Date) {
+  const parts: Record<string, string> = {};
+  for (const p of new Intl.DateTimeFormat("en-US", {
+    timeZone: zone, hourCycle: "h23", weekday: "short", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(date)) parts[p.type] = p.value;
+  return {
+    day: WEEKDAYS_EN.indexOf(parts.weekday), hour: +parts.hour % 24, minute: +parts.minute,
+    utcMs: Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second),
+  };
+}
+// Local weekday (0 = Monday), minutes since midnight and UTC offset at a destination right now.
+function destLocalNow(code: string, now = new Date()): { day: number; minutes: number; offsetMin: number } {
+  const zone = TZ_ZONES[code];
+  if (zone) {
+    try {
+      const p = zonedParts(zone, now);
+      return { day: p.day, minutes: p.hour * 60 + p.minute, offsetMin: Math.round((p.utcMs - Math.floor(now.getTime() / 1000) * 1000) / 60000) };
+    } catch { /* unknown zone in this browser: fall through to the fixed offset */ }
+  }
+  const offsetMin = (TZ_OFFSETS[code] ?? 0) * 60;
+  const d = new Date(now.getTime() + offsetMin * 60000);
+  return { day: (d.getUTCDay() + 6) % 7, minutes: d.getUTCHours() * 60 + d.getUTCMinutes(), offsetMin };
+}
+function fmtMinutes(min: number): string {
+  const m = ((min % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
 // ─── DESTINATION ───────────────────────────────────────────────────────────────
@@ -1469,13 +1633,13 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         </div>
         <div className="dest-hero-name">{dest.city}</div>
         {(() => {
-          const offset = TZ_OFFSETS[code] ?? 0;
-          const diff = offset - 2;
+          const local = destLocalNow(code);
+          const diff = (local.offsetMin - destLocalNow("AMS").offsetMin) / 60;
           const diffStr = diff === 0 ? "= AMS" : `${diff > 0 ? "+" : "−"}${Math.abs(diff)}h`;
           return (
             <div className="dest-meta-row">
               <button className="dest-meta-chip dest-meta-chip-btn" onClick={() => setShowWeather(true)}><Icon name="cloud" size={16} color="var(--accent)" />{liveWeather ?? dest.weather}</button>
-              <span className="dest-meta-chip"><Icon name="clock" size={16} color="var(--accent)" />{fmtTime(offset)} <span className="dest-meta-sub">{diffStr}</span></span>
+              <span className="dest-meta-chip"><Icon name="clock" size={16} color="var(--accent)" />{fmtMinutes(local.minutes)} <span className="dest-meta-sub">{diffStr}</span></span>
               {dest.crewHotel && (
                 <button className="dest-meta-chip dest-meta-chip-btn dest-meta-chip-hotel" onClick={() => setShowMap(true)}><Icon name="hotel" size={16} color="var(--accent)" /><span className="dest-meta-ellipsis">{dest.crewHotel}</span></button>
               )}
@@ -1569,7 +1733,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 {(tip.price || tip.hours || tip.discount || (tip.category === "food" && (tip.jetlagProof || tip.soloFriendly || tip.quickBite)) || tip.visibility === "connections" || (tip.coords && hotelCoords)) && (
                   <div className="tip-meta-row">
                     {tip.price && <span className="tip-price-badge">{tip.price === "Free" ? "Free" : tip.price}</span>}
-                    {tip.hours && <span className="tip-hours-badge"><Icon name="clock" size={13} />{tip.hours}</span>}
+                    {tip.hours && <TipHoursBadges hours={tip.hours} code={code} />}
                     {tip.discount && <span className="tip-discount-badge"><Icon name="tag" size={13} />{tip.discount === true ? "Crew discount" : `${tip.discount} crew`}</span>}
                     {tip.category === "food" && tip.jetlagProof && <span className="tip-jetlag-badge"><Icon name="moon" size={13} />Jetlag proof</span>}
                     {tip.category === "food" && tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}

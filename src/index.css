@@ -95,6 +95,10 @@
       .tip-price-badge, .tip-hours-badge, .tip-discount-badge, .tip-distance-badge, .tip-jetlag-badge, .tip-solo-badge, .tip-quickbite-badge, .tip-private-badge, .jetlag-detected-badge { display:inline-flex; align-items:center; gap:5px; border:none; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; }
       .tip-price-badge { background:#FEF3E2; color:#92400E; }
       .tip-hours-badge { background:var(--surface2); color:var(--navy); }
+      .tip-open-badge { display:inline-flex; align-items:center; gap:6px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:700; }
+      .tip-open-badge.is-open { background:#E3F6EE; color:#047857; }
+      .tip-open-badge.is-closed { background:#FDECEC; color:#B91C1C; }
+      .open-dot { width:8px; height:8px; border-radius:50%; background:currentColor; flex-shrink:0; }
       .tip-discount-badge { background:#E3F6EE; color:#065F46; }
       .tip-distance-badge { background:#EEF1F5; color:var(--text3); }
       .tip-jetlag-badge, .jetlag-detected-badge { background:#EEF0FF; color:#4338CA; }
