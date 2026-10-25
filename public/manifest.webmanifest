@@ -1,0 +1,14 @@
+{
+  "name": "WingTips",
+  "short_name": "WingTips",
+  "description": "The layover guide written by KLM crew, for KLM crew.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#003082",
+  "theme_color": "#003082",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
