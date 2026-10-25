@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.19.0";
+const APP_VERSION = "1.19.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -854,6 +854,7 @@ function useRecommendations() {
       role: r.author_role,
       text: r.text,
       date: (r.created_at || "").slice(0, 10),
+      createdAt: r.created_at || undefined,
       price: r.price || undefined,
       hours: r.hours || undefined,
       discount: r.discount === "true" ? true : (r.discount || undefined),
@@ -911,7 +912,7 @@ function useRecommendations() {
     if (error || !data) return null;
     const newTip = {
       id: data.id, destCode, category: data.category, authorId: data.author_id, name: data.author_name, role: data.author_role,
-      text: data.text, date: (data.created_at || "").slice(0, 10),
+      text: data.text, date: (data.created_at || "").slice(0, 10), createdAt: data.created_at || undefined,
       price: data.price || undefined, hours: data.hours || undefined,
       discount: data.discount === "true" ? true : (data.discount || undefined),
       jetlagProof: data.jetlag_proof || undefined, soloFriendly: data.solo_friendly || undefined, quickBite: data.quick_bite || undefined, crewFriendly: data.crew_friendly || undefined,
@@ -1400,7 +1401,8 @@ function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
     let best: { tip: any; destCode: string; destCity: string; destFlag: string } | null = null;
     for (const dest of Object.values(DESTINATIONS) as any[]) {
       for (const tip of [...(dest.crewTips || []), ...((addedTips[dest.code]) || [])]) {
-        if (!best || (tip.date || "") > (best.tip.date || "")) {
+        // Full timestamp first: several tips on the same day otherwise tie on the date alone.
+        if (!best || (tip.createdAt || tip.date || "") > (best.tip.createdAt || best.tip.date || "")) {
           best = { tip, destCode: dest.code, destCity: dest.city, destFlag: dest.flag };
         }
       }
@@ -1769,7 +1771,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     .slice()
     .sort((a, b) => sortBy === "liked"
       ? b.likes - a.likes
-      : new Date(b.date).getTime() - new Date(a.date).getTime()
+      : new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime()
     );
 
   const categoryTipCount = crewTips.filter(t => t.category === activeCategory).length;
@@ -3269,7 +3271,7 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
       if (tip.category === category) results.push({ tip, destCode: dest.code, destCity: dest.city });
     }
   }
-  results.sort((a, b) => (b.tip.date || "").localeCompare(a.tip.date || ""));
+  results.sort((a, b) => (b.tip.createdAt || b.tip.date || "").localeCompare(a.tip.createdAt || a.tip.date || ""));
   const filteredResults = results
     .filter(r => !isFood || !filterJetlag || r.tip.jetlagProof)
     .filter(r => !isFood || !filterSolo || r.tip.soloFriendly)
