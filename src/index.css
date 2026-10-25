@@ -104,14 +104,20 @@
       .tip-jetlag-badge, .jetlag-detected-badge { background:#EEF0FF; color:#4338CA; }
       .tip-solo-badge { background:#E6F7F5; color:#0F766E; }
       .tip-quickbite-badge { background:#FEF3E2; color:#92400E; }
+      .tip-crew-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#E6EEF8; color:var(--navy); }
+      .more-options-btn { display:flex; align-items:center; gap:10px; width:100%; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:14px 16px; cursor:pointer; text-align:left; font-family:inherit; color:var(--text2); }
+      .more-options-btn.open { border-radius:16px 16px 0 0; border-bottom-color:transparent; }
+      .more-options-text { flex:1; display:flex; flex-direction:column; gap:2px; }
+      .more-options-count { background:var(--navy); color:#fff; border-radius:10px; padding:2px 9px; font-size:12px; font-weight:700; }
+      .more-options-panel { display:flex; flex-direction:column; gap:18px; background:var(--surface); border:1px solid var(--border); border-top:none; border-radius:0 0 16px 16px; padding:4px 16px 18px; margin-top:-18px; }
       .maps-hint { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text2); margin-top:6px; }
       .photo-upload-btn { display:inline-flex; align-items:center; gap:6px; cursor:pointer; background:var(--surface); border:1.5px dashed #C3D2E3; border-radius:16px; padding:12px 16px; font-size:14px; font-weight:600; color:var(--text2); transition:background 0.15s; }
       .photo-upload-btn:hover { background:var(--surface2); }
       .photo-preview-wrap { position:relative; display:inline-block; }
       .photo-preview { width:100%; max-height:200px; object-fit:cover; border-radius:16px; display:block; }
       .photo-remove-btn { position:absolute; top:8px; right:8px; display:inline-flex; align-items:center; gap:4px; background:rgba(16,35,63,0.6); border:none; border-radius:16px; color:white; font-size:12px; font-weight:600; padding:5px 10px; cursor:pointer; font-family:inherit; }
-      .donation-backdrop { position:fixed; inset:0; background:rgba(16,35,63,0.45); z-index:300; display:flex; align-items:flex-end; justify-content:center; animation:backdropIn 0.2s ease; }
-      .donation-modal { width:100%; max-width:480px; background:#fff; border-radius:28px 28px 0 0; padding:32px 24px 48px; animation:sheetUp 0.3s cubic-bezier(0.32,0.72,0,1); text-align:center; }
+      .donation-backdrop { position:fixed; inset:0; background:rgba(16,35,63,0.45); z-index:900; display:flex; align-items:flex-end; justify-content:center; animation:backdropIn 0.2s ease; }
+      .donation-modal { width:100%; max-width:480px; max-height:92vh; overflow-y:auto; background:#fff; border-radius:28px 28px 0 0; padding:28px 24px calc(28px + env(safe-area-inset-bottom, 0px)); animation:sheetUp 0.3s cubic-bezier(0.32,0.72,0,1); text-align:center; }
       .donation-wings-logo { display:flex; justify-content:center; margin-bottom:12px; }
       .donation-title { font-family:inherit; font-size:22px; font-weight:800; color:var(--text); margin-bottom:14px; letter-spacing:-0.5px; }
       .donation-body { font-size:14px; color:var(--text3); line-height:1.65; margin-bottom:24px; text-align:left; }

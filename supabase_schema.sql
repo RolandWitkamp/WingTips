@@ -170,6 +170,7 @@ create table if not exists recommendations (
   jetlag_proof boolean not null default false,
   solo_friendly boolean not null default false,
   quick_bite boolean not null default false,
+  crew_friendly boolean not null default false,
   visibility text not null default 'public',
   tags text[],
   photo text,
@@ -179,6 +180,7 @@ create table if not exists recommendations (
 alter table recommendations add column if not exists jetlag_proof boolean not null default false;
 alter table recommendations add column if not exists solo_friendly boolean not null default false;
 alter table recommendations add column if not exists quick_bite boolean not null default false;
+alter table recommendations add column if not exists crew_friendly boolean not null default false;
 alter table recommendations add column if not exists visibility text not null default 'public';
 alter table recommendations enable row level security;
 -- visibility='connections' tips are only readable by the author and their accepted connections

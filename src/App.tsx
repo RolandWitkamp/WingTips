@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.16.0";
+const APP_VERSION = "1.16.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -654,6 +654,7 @@ function useRecommendations() {
       jetlagProof: r.jetlag_proof || undefined,
       soloFriendly: r.solo_friendly || undefined,
       quickBite: r.quick_bite || undefined,
+      crewFriendly: r.crew_friendly || undefined,
       visibility: r.visibility || "public",
       tags: r.tags || undefined,
       photo: r.photo || undefined,
@@ -689,11 +690,14 @@ function useRecommendations() {
       discount: tipData.discount === true ? "true" : (tipData.discount || null),
       jetlag_proof: tipData.jetlagProof || false,
       solo_friendly: tipData.soloFriendly || false,
-      quick_bite: tipData.quickBite || false,
       visibility: tipData.visibility || "public",
       tags: tipData.tags || null,
       photo: tipData.photo || null,
       coords: tipData.coords || null,
+      // Newer flags are only sent when set, so a column that hasn't been added to the database
+      // yet can never block posting every other tip.
+      ...(tipData.quickBite ? { quick_bite: true } : {}),
+      ...(tipData.crewFriendly ? { crew_friendly: true } : {}),
     };
     const { data, error } = await supabase.from("recommendations").insert(row).select().maybeSingle();
     if (error || !data) return null;
@@ -702,7 +706,7 @@ function useRecommendations() {
       text: data.text, date: (data.created_at || "").slice(0, 10),
       price: data.price || undefined, hours: data.hours || undefined,
       discount: data.discount === "true" ? true : (data.discount || undefined),
-      jetlagProof: data.jetlag_proof || undefined, soloFriendly: data.solo_friendly || undefined, quickBite: data.quick_bite || undefined,
+      jetlagProof: data.jetlag_proof || undefined, soloFriendly: data.solo_friendly || undefined, quickBite: data.quick_bite || undefined, crewFriendly: data.crew_friendly || undefined,
       visibility: data.visibility || "public",
       tags: data.tags || undefined, photo: data.photo || undefined, coords: data.coords || undefined,
       comments: [] as any[], likes: 0, likedByMe: false,
@@ -786,7 +790,8 @@ async function migrateLocalDataToCloud(userId: string, serverProfile: { name: st
         author_name: t.name, author_role: t.role, text: t.text,
         price: t.price || null, hours: t.hours || null,
         discount: t.discount === true ? "true" : (t.discount || null),
-        jetlag_proof: t.jetlagProof || false, solo_friendly: t.soloFriendly || false, quick_bite: t.quickBite || false,
+        jetlag_proof: t.jetlagProof || false, solo_friendly: t.soloFriendly || false,
+        ...(t.quickBite ? { quick_bite: true } : {}), ...(t.crewFriendly ? { crew_friendly: true } : {}),
         visibility: t.visibility || "public",
         tags: t.tags || null, photo: t.photo || null, coords: t.coords || null,
         created_at: t.date ? new Date(t.date).toISOString() : new Date().toISOString(),
@@ -1504,10 +1509,11 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   const [filterJetlag, setFilterJetlag] = useState(false);
   const [filterSolo, setFilterSolo] = useState(false);
   const [filterQuickBite, setFilterQuickBite] = useState(false);
+  const [filterCrew, setFilterCrew] = useState(false);
   // Jetlag Proof / Solo Friendly / Quick Bite only ever make sense for food -- clear them if the
   // crew member switches category with one still active, so it can't silently keep filtering a
   // category where it no longer shows as an option.
-  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); } }, [activeCategory]);
+  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } }, [activeCategory]);
 
   const tipsForCat = crewTips
     .filter(t => t.category === activeCategory)
@@ -1515,6 +1521,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     .filter(t => !filterJetlag || t.jetlagProof)
     .filter(t => !filterSolo || t.soloFriendly)
     .filter(t => !filterQuickBite || t.quickBite)
+    .filter(t => !filterCrew || t.crewFriendly)
     .slice()
     .sort((a, b) => sortBy === "liked"
       ? b.likes - a.likes
@@ -1708,6 +1715,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}><Icon name="moon" size={14} />Jetlag proof</button>
             <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}><Icon name="user" size={14} />Solo friendly</button>
             <button className={`sf-btn${filterQuickBite ? " active" : ""}`} onClick={() => setFilterQuickBite(v => !v)}><Icon name="bolt" size={14} />Quick bite</button>
+            <button className={`sf-btn${filterCrew ? " active" : ""}`} onClick={() => setFilterCrew(v => !v)}><Icon name="plane" size={14} />Crew friendly</button>
           </div>
         )}
         {tipsForCat.length === 0
@@ -1730,7 +1738,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 {tip.tags && tip.tags.length > 0 && (
                   <div className="tip-tags-row">{tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                {(tip.price || tip.hours || tip.discount || (tip.category === "food" && (tip.jetlagProof || tip.soloFriendly || tip.quickBite)) || tip.visibility === "connections" || (tip.coords && hotelCoords)) && (
+                {(tip.price || tip.hours || tip.discount || (tip.category === "food" && (tip.jetlagProof || tip.soloFriendly || tip.quickBite || tip.crewFriendly)) || tip.visibility === "connections" || (tip.coords && hotelCoords)) && (
                   <div className="tip-meta-row">
                     {tip.price && <span className="tip-price-badge">{tip.price === "Free" ? "Free" : tip.price}</span>}
                     {tip.hours && <TipHoursBadges hours={tip.hours} code={code} />}
@@ -1738,6 +1746,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                     {tip.category === "food" && tip.jetlagProof && <span className="tip-jetlag-badge"><Icon name="moon" size={13} />Jetlag proof</span>}
                     {tip.category === "food" && tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}
                     {tip.category === "food" && tip.quickBite && <span className="tip-quickbite-badge"><Icon name="bolt" size={13} />Quick bite</span>}
+                    {tip.category === "food" && tip.crewFriendly && <span className="tip-crew-badge"><Icon name="plane" size={13} />Crew friendly</span>}
                     {tip.visibility === "connections" && <span className="tip-private-badge"><Icon name="lock" size={13} />Connections only</span>}
                     {tip.coords && hotelCoords && (
                       <span className="tip-distance-badge"><Icon name="hotel" size={13} />{fmtDistance(distanceKm({ lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) }, hotelCoords))} from crew hotel</span>
@@ -1865,6 +1874,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [jetlagProof, setJetlagProof] = useState(false);
   const [soloFriendly, setSoloFriendly] = useState(false);
   const [quickBite, setQuickBite] = useState(false);
+  const [crewFriendly, setCrewFriendly] = useState(false);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [visibility, setVisibility] = useState<"public" | "connections">("public");
   const [tags, setTags] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
@@ -1976,6 +1987,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     if (category === "food" && jetlagProof) newTip.jetlagProof = true;
     if (category === "food" && soloFriendly) newTip.soloFriendly = true;
     if (category === "food" && quickBite) newTip.quickBite = true;
+    if (category === "food" && crewFriendly) newTip.crewFriendly = true;
     newTip.visibility = visibility;
     if (photo) newTip.photo = photo;
     const parsedTags = tags.split(/[\s,#]+/).map((t: string) => t.replace(/^#/, "").trim()).filter(Boolean);
@@ -2178,62 +2190,82 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           )}
         </div>
 
-        <div className="form-group">
-          <div className="toggle-row">
-            <div>
-              <div className="form-lbl">Crew discount</div>
-              <div className="toggle-sub">Show a discount badge on this tip</div>
+        {(() => {
+          const activeCount = [crewDiscount, ...(category === "food" ? [soloFriendly, quickBite, crewFriendly] : [])].filter(Boolean).length;
+          return (
+            <button type="button" className={`more-options-btn${showMoreOptions ? " open" : ""}`} onClick={() => setShowMoreOptions(v => !v)} aria-expanded={showMoreOptions}>
+              <span className="more-options-text">
+                <span className="form-lbl">Extra details</span>
+                <span className="toggle-sub">{category === "food" ? "Crew discount, solo dining, quick bite, crew friendly" : "Crew discount"} · optional</span>
+              </span>
+              {activeCount > 0 && <span className="more-options-count">{activeCount} on</span>}
+              <Icon name={showMoreOptions ? "chevronUp" : "chevronDown"} size={18} />
+            </button>
+          );
+        })()}
+
+        {showMoreOptions && (
+          <div className="more-options-panel">
+            <div className="toggle-row">
+              <div>
+                <div className="form-lbl">Crew discount</div>
+                <div className="toggle-sub">Show a discount badge on this tip</div>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={crewDiscount} onChange={e => { setCrewDiscount(e.target.checked); if (!e.target.checked) setDiscountPct(""); }} />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
             </div>
-            <label className="toggle-switch">
-              <input type="checkbox" checked={crewDiscount} onChange={e => { setCrewDiscount(e.target.checked); if (!e.target.checked) setDiscountPct(""); }} />
-              <span className="toggle-track"><span className="toggle-thumb" /></span>
-            </label>
+            {crewDiscount && (
+              <div className="discount-field-row">
+                <input
+                  className="form-inp discount-inp"
+                  type="number"
+                  min="1"
+                  max="100"
+                  placeholder="e.g. 15"
+                  value={discountPct}
+                  onChange={e => setDiscountPct(e.target.value)}
+                />
+                <span className="discount-pct-label">%</span>
+                <span className="discount-hint">Leave blank if amount is unknown</span>
+              </div>
+            )}
+            {category === "food" && (
+              <>
+            <div className="toggle-row">
+              <div>
+                <div className="form-lbl">Solo dining friendly</div>
+                <div className="toggle-sub">Good for crew eating alone: bar or counter seating, no awkward family tables</div>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={soloFriendly} onChange={e => setSoloFriendly(e.target.checked)} />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
+            </div>
+            <div className="toggle-row">
+              <div>
+                <div className="form-lbl">Quick bite</div>
+                <div className="toggle-sub">Good food without a long sit-down meal, in and out fast</div>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={quickBite} onChange={e => setQuickBite(e.target.checked)} />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
+            </div>
+            <div className="toggle-row">
+              <div>
+                <div className="form-lbl">Crew friendly</div>
+                <div className="toggle-sub">Used to crew: welcoming at odd hours, fine in uniform, easy with split bills</div>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={crewFriendly} onChange={e => setCrewFriendly(e.target.checked)} />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
+            </div>
+              </>
+            )}
           </div>
-          {crewDiscount && (
-            <div className="discount-field-row">
-              <input
-                className="form-inp discount-inp"
-                type="number"
-                min="1"
-                max="100"
-                placeholder="e.g. 15"
-                value={discountPct}
-                onChange={e => setDiscountPct(e.target.value)}
-              />
-              <span className="discount-pct-label">%</span>
-              <span className="discount-hint">Leave blank if amount is unknown</span>
-            </div>
-          )}
-        </div>
-
-        {category === "food" && (
-          <>
-            <div className="form-group">
-              <div className="toggle-row">
-                <div>
-                  <div className="form-lbl">Solo dining friendly</div>
-                  <div className="toggle-sub">Good for crew eating alone — bar/counter seating, no awkward family tables</div>
-                </div>
-                <label className="toggle-switch">
-                  <input type="checkbox" checked={soloFriendly} onChange={e => setSoloFriendly(e.target.checked)} />
-                  <span className="toggle-track"><span className="toggle-thumb" /></span>
-                </label>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <div className="toggle-row">
-                <div>
-                  <div className="form-lbl">Quick bite</div>
-                  <div className="toggle-sub">Good food, but not a long sit-down meal — in and out fast</div>
-                </div>
-                <label className="toggle-switch">
-                  <input type="checkbox" checked={quickBite} onChange={e => setQuickBite(e.target.checked)} />
-                  <span className="toggle-track"><span className="toggle-thumb" /></span>
-                </label>
-              </div>
-            </div>
-          </>
         )}
 
         <div className="form-group">
@@ -2849,6 +2881,7 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
   const [filterJetlag, setFilterJetlag] = useState(false);
   const [filterSolo, setFilterSolo] = useState(false);
   const [filterQuickBite, setFilterQuickBite] = useState(false);
+  const [filterCrew, setFilterCrew] = useState(false);
   const isFood = category === "food";
   const results: Array<{ tip: any; destCode: string; destCity: string }> = [];
   for (const dest of Object.values(DESTINATIONS) as any[]) {
@@ -2861,7 +2894,8 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
   const filteredResults = results
     .filter(r => !isFood || !filterJetlag || r.tip.jetlagProof)
     .filter(r => !isFood || !filterSolo || r.tip.soloFriendly)
-    .filter(r => !isFood || !filterQuickBite || r.tip.quickBite);
+    .filter(r => !isFood || !filterQuickBite || r.tip.quickBite)
+    .filter(r => !isFood || !filterCrew || r.tip.crewFriendly);
 
   return (
     <div className="screen">
@@ -2876,6 +2910,7 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
             <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}><Icon name="moon" size={14} />Jetlag proof</button>
             <button className={`sf-btn${filterSolo ? " active" : ""}`} onClick={() => setFilterSolo(v => !v)}><Icon name="user" size={14} />Solo friendly</button>
             <button className={`sf-btn${filterQuickBite ? " active" : ""}`} onClick={() => setFilterQuickBite(v => !v)}><Icon name="bolt" size={14} />Quick bite</button>
+            <button className={`sf-btn${filterCrew ? " active" : ""}`} onClick={() => setFilterCrew(v => !v)}><Icon name="plane" size={14} />Crew friendly</button>
           </div>
         )}
         {filteredResults.length === 0
@@ -2898,11 +2933,12 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
                 {r.tip.tags && r.tip.tags.length > 0 && (
                   <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                {((isFood && (r.tip.jetlagProof || r.tip.soloFriendly || r.tip.quickBite)) || r.tip.visibility === "connections") && (
+                {((isFood && (r.tip.jetlagProof || r.tip.soloFriendly || r.tip.quickBite || r.tip.crewFriendly)) || r.tip.visibility === "connections") && (
                   <div className="tip-meta-row">
                     {isFood && r.tip.jetlagProof && <span className="tip-jetlag-badge"><Icon name="moon" size={13} />Jetlag proof</span>}
                     {isFood && r.tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}
                     {isFood && r.tip.quickBite && <span className="tip-quickbite-badge"><Icon name="bolt" size={13} />Quick bite</span>}
+                    {isFood && r.tip.crewFriendly && <span className="tip-crew-badge"><Icon name="plane" size={13} />Crew friendly</span>}
                     {r.tip.visibility === "connections" && <span className="tip-private-badge"><Icon name="lock" size={13} />Connections only</span>}
                   </div>
                 )}
