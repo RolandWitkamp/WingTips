@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.16.2";
+const APP_VERSION = "1.16.3";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -324,7 +324,7 @@ function TipText({ text, className }: { text: string; className: string }) {
 }
 // Donations go through a bunq.me payment request with the amount pre-filled; the app can't see
 // whether the payment was actually completed.
-const BUNQME_NAME = "";
+const BUNQME_NAME = "WingTips";
 const DONATION_AMOUNTS = [0.5, 1, 2];
 const DONATION_REMIND_KEY = "wt_donation_remind_at";
 function fmtEuro(amount: number): string {
