@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.16.1";
+const APP_VERSION = "1.16.2";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -322,6 +322,62 @@ function TipText({ text, className }: { text: string; className: string }) {
     </>
   );
 }
+// Donations go through a bunq.me payment request with the amount pre-filled; the app can't see
+// whether the payment was actually completed.
+const BUNQME_NAME = "";
+const DONATION_AMOUNTS = [0.5, 1, 2];
+const DONATION_REMIND_KEY = "wt_donation_remind_at";
+function fmtEuro(amount: number): string {
+  return `€${amount.toFixed(2).replace(".", ",")}`;
+}
+function openDonation(amount: number) {
+  if (!BUNQME_NAME) return;
+  window.open(`https://bunq.me/${BUNQME_NAME}/${amount.toFixed(2)}/${encodeURIComponent("WingTips donation")}`, "_blank", "noopener");
+}
+function setDonationReminder(hoursFromNow: number | null) {
+  try {
+    if (hoursFromNow === null) localStorage.removeItem(DONATION_REMIND_KEY);
+    else localStorage.setItem(DONATION_REMIND_KEY, String(Date.now() + hoursFromNow * 3600000));
+  } catch { /* storage unavailable: no reminder */ }
+}
+function donationReminderDue(): boolean {
+  try {
+    const at = Number(localStorage.getItem(DONATION_REMIND_KEY));
+    return !!at && Date.now() >= at;
+  } catch { return false; }
+}
+function DonationAmountPicker({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  return (
+    <div className="donation-amounts">
+      {DONATION_AMOUNTS.map(amt => (
+        <button key={amt} type="button" className={`donation-chip${value === amt ? " active" : ""}`} onClick={() => onChange(value === amt ? null : amt)}>
+          {fmtEuro(amt)}
+        </button>
+      ))}
+    </div>
+  );
+}
+function DonationReminderCard() {
+  const [due, setDue] = useState(donationReminderDue);
+  const [amount, setAmount] = useState<number | null>(1);
+  if (!due || !BUNQME_NAME) return null;
+  return (
+    <div className="section-block">
+      <div className="donation-reminder">
+        <div className="donation-reminder-head"><Icon name="heart" size={20} color="var(--accent)" />Still want to chip in?</div>
+        <p className="donation-reminder-text">You asked us to remind you. Half of every donation goes to Wings of Support.</p>
+        <DonationAmountPicker value={amount} onChange={setAmount} />
+        <div className="donation-reminder-actions">
+          <button type="button" className="donation-btn-primary" disabled={!amount} onClick={() => { if (amount) openDonation(amount); setDonationReminder(null); setDue(false); }}>
+            {amount ? `Donate ${fmtEuro(amount)}` : "Select an amount"}
+          </button>
+          <button type="button" className="donation-btn-skip" onClick={() => { setDonationReminder(null); setDue(false); }}>Not now</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildTipShareText(tip: any, dest: any): string {
   const cat = CATEGORIES.find(c => c.id === tip.category);
   const lines = [`${dest.flag} ${dest.city} · ${cat?.label || tip.category}`, tip.text];
@@ -1214,6 +1270,7 @@ function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
           )}
         </div>
       </div>
+      <DonationReminderCard />
       {recentDests.length > 0 && (
         <div className="section-block">
           <div className="section-label">Quick access</div>
@@ -1996,8 +2053,11 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     setShowDonation(true);
   }
 
-  async function finalize(donated: boolean) {
+  async function finalize(choice: "donate" | "later" | "skip") {
     if (submitting) return;
+    // Opened inside the tap itself so the browser doesn't treat it as a blocked pop-up.
+    if (choice === "donate" && donationAmount) { openDonation(donationAmount); setDonationReminder(null); }
+    if (choice === "later") setDonationReminder(24);
     setSubmitting(true);
     const ok = await onSubmit(destCode, pendingTip);
     setSubmitting(false);
@@ -2022,23 +2082,25 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
             <div className="donation-wings-logo"><Icon name="heart" size={44} color="var(--accent)" strokeWidth={1.6} /></div>
             <div className="donation-title">Before you post…</div>
             <p className="donation-body">
-              WingTips is free — and so is sharing knowledge. If this community has saved you time or money on a layover, consider leaving a small token.<br /><br />
+              WingTips is free, and so is sharing knowledge. If this community has saved you time or money on a layover, consider leaving a small token.<br /><br />
               <strong>50% of every donation</strong> goes directly to <strong>Wings of Support</strong>, a foundation supporting KLM crew and their families in need.
             </p>
-            <div className="donation-amounts">
-              {[2, 5, 10].map(amt => (
-                <button key={amt} className={`donation-chip${donationAmount === amt ? " active" : ""}`} onClick={() => setDonationAmount(donationAmount === amt ? null : amt)}>
-                  €{amt}
-                </button>
-              ))}
-            </div>
-            {submitError && <p className="donation-error">Couldn't post your recommendation — check your connection and try again.</p>}
-            <button className="donation-btn-primary" onClick={() => finalize(true)} disabled={!donationAmount || submitting}>
-              {submitting ? "Posting…" : donationAmount ? `Donate €${donationAmount} & Post` : "Select an amount"}
-            </button>
-            <button className="donation-btn-skip" onClick={() => finalize(false)} disabled={submitting}>
+            {BUNQME_NAME && <DonationAmountPicker value={donationAmount} onChange={setDonationAmount} />}
+            {submitError && <p className="donation-error">Couldn't post your recommendation. Check your connection and try again.</p>}
+            {BUNQME_NAME && (
+              <button className="donation-btn-primary" onClick={() => finalize("donate")} disabled={!donationAmount || submitting}>
+                {submitting ? "Posting…" : donationAmount ? `Donate ${fmtEuro(donationAmount)} & post` : "Select an amount"}
+              </button>
+            )}
+            {BUNQME_NAME && (
+              <button className="donation-btn-later" onClick={() => finalize("later")} disabled={submitting}>
+                Post now, remind me tomorrow
+              </button>
+            )}
+            <button className="donation-btn-skip" onClick={() => finalize("skip")} disabled={submitting}>
               {submitting ? "Posting…" : "Skip and post without donating"}
             </button>
+            {BUNQME_NAME && <p className="donation-note">Opens a bunq payment page. Pay with iDEAL from any Dutch bank.</p>}
           </div>
         </div>
       )}

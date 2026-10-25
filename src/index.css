@@ -129,6 +129,13 @@
       .donation-btn-primary:disabled { background:#CBD5E1; cursor:not-allowed; }
       .donation-btn-primary:not(:disabled):hover { background:#00266A; }
       .donation-btn-skip { background:none; border:none; font-size:13px; color:var(--text2); cursor:pointer; font-family:inherit; text-decoration:underline; text-decoration-color:rgba(0,0,0,0.2); }
+      .donation-btn-later { width:100%; padding:14px; background:var(--surface2); border:none; border-radius:24px; color:var(--navy); font-family:inherit; font-size:15px; font-weight:700; cursor:pointer; margin-bottom:12px; }
+      .donation-note { font-size:12px; color:var(--text2); margin-top:12px; }
+      .donation-reminder { background:var(--surface); border-radius:22px; padding:18px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:10px; }
+      .donation-reminder-head { display:flex; align-items:center; gap:8px; font-size:16px; font-weight:800; color:var(--text); }
+      .donation-reminder-text { font-size:14px; color:var(--text3); line-height:1.5; }
+      .donation-reminder .donation-amounts { margin-bottom:4px; }
+      .donation-reminder-actions { display:flex; flex-direction:column; align-items:center; }
       .donation-error { font-size:12px; color:#DC2626; background:rgba(220,38,38,0.08); border-radius:8px; padding:8px 12px; margin-bottom:10px; }
       .tip-photo { width:100%; max-height:200px; object-fit:cover; border-radius:16px; margin-bottom:10px; display:block; }
       .rec-cat-row { display:flex; flex-wrap:wrap; gap:8px; }
