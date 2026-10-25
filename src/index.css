@@ -359,6 +359,13 @@
         .my-tip-card.signup-unread { box-shadow:0 0 0 2px rgba(0,161,222,0.4), var(--shadow); }
         .my-tip-meta { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--text2); margin-bottom:8px; }
         .my-tip-text { font-size:14px; color:var(--text3); line-height:1.55; margin-bottom:10px; }
+        .my-tip-footer { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+        .delete-tip-btn { display:inline-flex; align-items:center; gap:5px; height:34px; padding:0 10px; background:none; border:none; border-radius:17px; font-size:13px; font-weight:600; color:var(--text2); cursor:pointer; font-family:inherit; }
+        .delete-tip-btn:hover { background:#FDECEC; color:#B91C1C; }
+        .delete-confirm { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
+        .delete-confirm-q { font-size:13px; font-weight:600; color:#B91C1C; }
+        .delete-confirm-yes { height:32px; padding:0 14px; border:none; border-radius:16px; background:#DC2626; color:#fff; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; }
+        .delete-confirm-no { height:32px; padding:0 12px; border:none; border-radius:16px; background:var(--surface2); color:var(--text2); font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
         .my-tip-likes { display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--text2); }
 
         /* Same reasoning as .map-overlay: positioned within the screen-area wrapper (bounded by
