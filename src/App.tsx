@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.18.0";
+const APP_VERSION = "1.19.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -313,6 +313,121 @@ function splitTipText(text: string): { title: string; body: string } {
   const i = rest.indexOf("—");
   return i < 0 ? { title: rest.trim(), body: "" } : { title: rest.slice(0, i).trim(), body: rest.slice(i + 1).trim() };
 }
+const TRIP_MODES = [
+  { id: "rental", label: "Rental car" },
+  { id: "guide", label: "With a guide" },
+  { id: "transport", label: "Taxi or transport" },
+  { id: "foot", label: "On foot" },
+];
+function TripModeIcon({ mode, size = 15, color }: { mode: string; size?: number; color?: string }) {
+  if (mode === "rental") return <CategoryIcon id="roadtrip" size={size} color={color || "currentColor"} />;
+  return <Icon name={mode === "guide" ? "users" : mode === "transport" ? "bus" : "compass"} size={size} color={color} />;
+}
+function tripModeLabel(mode?: string): string {
+  return TRIP_MODES.find(m => m.id === mode)?.label || "";
+}
+function phoneDigits(phone: string): string {
+  return (phone || "").replace(/[^\d+]/g, "").replace(/^00/, "+");
+}
+function TripChips({ trip }: { trip: any }) {
+  if (!trip) return null;
+  const cost = trip.cost ? `${trip.cost}${trip.costBasis === "pp" ? " per person" : trip.costBasis === "total" ? " in total" : ""}${trip.groupSize ? ` · group of ${trip.groupSize}` : ""}` : "";
+  return (
+    <div className="tip-meta-row">
+      {trip.mode && <span className="trip-chip trip-chip-mode"><TripModeIcon mode={trip.mode} size={13} />{tripModeLabel(trip.mode)}</span>}
+      {cost && <span className="trip-chip"><Icon name="tag" size={13} />{cost}</span>}
+      {trip.duration && <span className="trip-chip"><Icon name="clock" size={13} />{trip.duration}</span>}
+      {trip.layover && <span className="trip-chip trip-chip-layover"><Icon name="plane" size={13} />{trip.layover === "24" ? "Fits a 24h layover" : "Needs 48h or more"}</span>}
+    </div>
+  );
+}
+function TripDetails({ trip }: { trip: any }) {
+  if (!trip) return null;
+  const digits = phoneDigits(trip.contactPhone);
+  const lines: [string, string][] = [];
+  if (trip.included) lines.push(["Included", trip.included]);
+  if (trip.season) lines.push(["Best time", trip.season]);
+  if (trip.bring) lines.push(["Bring", trip.bring]);
+  if (trip.rentalCompany) lines.push(["Rental", trip.rentalCompany]);
+  if (trip.discountCode) lines.push(["Discount code", trip.discountCode]);
+  if (trip.rentalTips) lines.push(["Car tips", trip.rentalTips]);
+  return (
+    <>
+      <TripChips trip={trip} />
+      {lines.length > 0 && (
+        <dl className="trip-lines">
+          {lines.map(([k, v]) => <div key={k} className="trip-line"><dt>{k}</dt><dd>{v}</dd></div>)}
+        </dl>
+      )}
+      {(trip.contactName || digits) && (
+        <div className="trip-contact">
+          <span className="trip-contact-icon"><Icon name="user" size={18} /></span>
+          <span className="trip-contact-text">
+            <span className="trip-contact-name">{trip.contactName || "Contact"}</span>
+            {trip.contactPhone && <span className="trip-contact-phone">{trip.contactPhone}</span>}
+          </span>
+          {digits.length >= 8 && (
+            <>
+              <a className="trip-contact-btn" href={`https://wa.me/${digits.replace(/^\+/, "")}`} target="_blank" rel="noreferrer" aria-label="WhatsApp"><Icon name="comment" size={16} />WhatsApp</a>
+              <a className="trip-contact-btn trip-contact-call" href={`tel:${digits}`} aria-label="Call"><Icon name="phone" size={16} /></a>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Shrinks a picked photo before it's stored, so a full-size phone photo (often 3-5 MB) doesn't
+// end up in the database as-is.
+function resizeImage(file: File, max = 1400, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("unreadable image")); };
+    img.src = url;
+  });
+}
+function TipPhotos({ photos }: { photos?: string[] }) {
+  const [open, setOpen] = useState<number | null>(null);
+  if (!photos || photos.length === 0) return null;
+  const shown = photos.slice(0, 4);
+  return (
+    <>
+      <div className={`tip-photos tip-photos-${Math.min(photos.length, 4)}`}>
+        {shown.map((src, i) => (
+          <button key={i} type="button" className="tip-photo-btn" onClick={() => setOpen(i)} aria-label={`Open photo ${i + 1} of ${photos.length}`}>
+            <img src={src} alt="" loading="lazy" />
+            {i === 3 && photos.length > 4 && <span className="tip-photo-more">+{photos.length - 4}</span>}
+          </button>
+        ))}
+      </div>
+      {open !== null && (
+        <div className="photo-viewer" role="dialog" aria-modal="true" onClick={() => setOpen(null)}>
+          <img src={photos[open]} alt="" onClick={e => e.stopPropagation()} />
+          <button type="button" className="photo-viewer-close" onClick={() => setOpen(null)} aria-label="Close"><Icon name="close" size={20} /></button>
+          {photos.length > 1 && (
+            <>
+              <button type="button" className="photo-viewer-nav prev" aria-label="Previous photo" onClick={e => { e.stopPropagation(); setOpen((open + photos.length - 1) % photos.length); }}><Icon name="back" size={22} /></button>
+              <button type="button" className="photo-viewer-nav next" aria-label="Next photo" onClick={e => { e.stopPropagation(); setOpen((open + 1) % photos.length); }}><Icon name="chevronRight" size={22} /></button>
+              <div className="photo-viewer-count">{open + 1} / {photos.length}</div>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 function TipText({ text, className }: { text: string; className: string }) {
   const { title, body } = splitTipText(text);
   return (
@@ -748,7 +863,8 @@ function useRecommendations() {
       crewFriendly: r.crew_friendly || undefined,
       visibility: r.visibility || "public",
       tags: r.tags || undefined,
-      photo: r.photo || undefined,
+      photos: Array.isArray(r.photos) && r.photos.length ? r.photos : (r.photo ? [r.photo] : undefined),
+      trip: r.trip || undefined,
       coords: r.coords || undefined,
       comments: commentsByRec[r.id] || [],
       likes: likesByRec[r.id]?.count || 0,
@@ -783,12 +899,13 @@ function useRecommendations() {
       solo_friendly: tipData.soloFriendly || false,
       visibility: tipData.visibility || "public",
       tags: tipData.tags || null,
-      photo: tipData.photo || null,
       coords: tipData.coords || null,
       // Newer flags are only sent when set, so a column that hasn't been added to the database
       // yet can never block posting every other tip.
       ...(tipData.quickBite ? { quick_bite: true } : {}),
       ...(tipData.crewFriendly ? { crew_friendly: true } : {}),
+      ...(tipData.photos?.length ? { photos: tipData.photos } : {}),
+      ...(tipData.trip ? { trip: tipData.trip } : {}),
     };
     const { data, error } = await supabase.from("recommendations").insert(row).select().maybeSingle();
     if (error || !data) return null;
@@ -799,7 +916,8 @@ function useRecommendations() {
       discount: data.discount === "true" ? true : (data.discount || undefined),
       jetlagProof: data.jetlag_proof || undefined, soloFriendly: data.solo_friendly || undefined, quickBite: data.quick_bite || undefined, crewFriendly: data.crew_friendly || undefined,
       visibility: data.visibility || "public",
-      tags: data.tags || undefined, photo: data.photo || undefined, coords: data.coords || undefined,
+      tags: data.tags || undefined, coords: data.coords || undefined,
+      photos: Array.isArray(data.photos) && data.photos.length ? data.photos : undefined, trip: data.trip || undefined,
       comments: [] as any[], likes: 0, likedByMe: false,
     };
     setRecs(prev => [newTip, ...prev]);
@@ -1147,7 +1265,7 @@ const CATEGORIES = [
   { id: "accommodation", label: "Accommodation",   color: "#0EA5E9" },
   { id: "working",       label: "Working",         color: "#64748B" },
   { id: "gems",          label: "Hidden Gems",     color: "#D946EF" },
-  { id: "roadtrip",      label: "Road Trip",       color: "#F59E0B" },
+  { id: "roadtrip",      label: "Trips & Tours",   color: "#F59E0B" },
   { id: "other",         label: "Other",           color: "#78716C" },
 ];
 
@@ -1219,6 +1337,9 @@ const UI_ICON_PATHS: Record<string, string> = {
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   map: '<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><path d="M9 3v15M15 6v15"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  bus: '<rect x="4" y="4" width="16" height="13" rx="2"/><path d="M4 11h16M8 17v3M16 17v3"/><circle cx="8" cy="14" r=".8"/><circle cx="16" cy="14" r=".8"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
   home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
@@ -1631,10 +1752,11 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   const [filterSolo, setFilterSolo] = useState(false);
   const [filterQuickBite, setFilterQuickBite] = useState(false);
   const [filterCrew, setFilterCrew] = useState(false);
+  const [filterMode, setFilterMode] = useState("");
   // Jetlag Proof / Solo Friendly / Quick Bite only ever make sense for food -- clear them if the
   // crew member switches category with one still active, so it can't silently keep filtering a
   // category where it no longer shows as an option.
-  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } }, [activeCategory]);
+  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } if (activeCategory !== "roadtrip") setFilterMode(""); }, [activeCategory]);
 
   const tipsForCat = crewTips
     .filter(t => t.category === activeCategory)
@@ -1643,6 +1765,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     .filter(t => !filterSolo || t.soloFriendly)
     .filter(t => !filterQuickBite || t.quickBite)
     .filter(t => !filterCrew || t.crewFriendly)
+    .filter(t => !filterMode || t.trip?.mode === filterMode)
     .slice()
     .sort((a, b) => sortBy === "liked"
       ? b.likes - a.likes
@@ -1831,6 +1954,13 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <option value="Cabin Crew">Cabin Crew</option>
           </select>
         </div>
+        {activeCategory === "roadtrip" && (
+          <div className="sort-filter-bar crew-filter-bar">
+            {TRIP_MODES.map(m => (
+              <button key={m.id} className={`sf-btn${filterMode === m.id ? " active" : ""}`} onClick={() => setFilterMode(v => v === m.id ? "" : m.id)}><TripModeIcon mode={m.id} size={14} />{m.label}</button>
+            ))}
+          </div>
+        )}
         {activeCategory === "food" && (
           <div className="sort-filter-bar crew-filter-bar">
             <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}><Icon name="moon" size={14} />Jetlag proof</button>
@@ -1854,8 +1984,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                   </div>
                   <div className="crew-card-date">{tip.date}</div>
                 </div>
-                {tip.photo && <img className="tip-photo" src={tip.photo} alt="tip photo" />}
+                <TipPhotos photos={tip.photos} />
                 <TipText text={tip.text} className="crew-card-text" />
+                {tip.category === "roadtrip" && <TripDetails trip={tip.trip} />}
                 {tip.tags && tip.tags.length > 0 && (
                   <div className="tip-tags-row">{tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
@@ -2002,7 +2133,11 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [visibility, setVisibility] = useState<"public" | "connections">("public");
   const [tags, setTags] = useState("");
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [photoError, setPhotoError] = useState(false);
+  const [tripMode, setTripMode] = useState("");
+  const [trip, setTrip] = useState<Record<string, string>>({});
+  const setTripField = (k: string, v: string) => setTrip(t => ({ ...t, [k]: v }));
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(false);
@@ -2094,7 +2229,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   }
 
   function handleSubmit() {
-    if (!place.trim() || !destCode || !note.trim() || !name.trim()) return;
+    if (!place.trim() || !destCode || !note.trim() || !name.trim() || (isRoadTrip && !tripMode)) return;
     const newTip: any = {
       id: Date.now(),
       name: name.trim(),
@@ -2114,7 +2249,14 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     if (category === "food" && quickBite) newTip.quickBite = true;
     if (category === "food" && crewFriendly) newTip.crewFriendly = true;
     newTip.visibility = visibility;
-    if (photo) newTip.photo = photo;
+    if (photos.length) newTip.photos = photos;
+    if (isRoadTrip) {
+      const keep = ["contactName", "contactPhone", "cost", "costBasis", "groupSize", "included", "duration", "layover", "season", "bring",
+        ...(tripMode === "rental" ? ["rentalCompany", "discountCode", "rentalTips"] : [])];
+      const t: Record<string, string> = { mode: tripMode };
+      for (const k of keep) if ((trip[k] || "").trim()) t[k] = trip[k].trim();
+      newTip.trip = t;
+    }
     const parsedTags = tags.split(/[\s,#]+/).map((t: string) => t.replace(/^#/, "").trim()).filter(Boolean);
     if (parsedTags.length > 0) newTip.tags = parsedTags;
     setPendingTip(newTip);
@@ -2278,11 +2420,23 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         {isRoadTrip ? (
-          <div className="form-group">
-            <label className="form-lbl">Trip title</label>
-            <input className="form-inp" placeholder="e.g. Pacific Coast Highway, San Francisco to Big Sur"
-              value={place} onChange={e => setPlace(e.target.value)} />
-          </div>
+          <>
+            <div className="form-group">
+              <label className="form-lbl" htmlFor="trip-title">Trip title</label>
+              <input id="trip-title" className="form-inp" placeholder="e.g. Akagera safari with a local guide"
+                value={place} onChange={e => setPlace(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-lbl">How did you get around?</label>
+              <div className="price-chip-row">
+                {TRIP_MODES.map(m => (
+                  <button key={m.id} type="button" className={`price-chip${tripMode === m.id ? " active" : ""}`} onClick={() => setTripMode(m.id)}>
+                    <TripModeIcon mode={m.id} size={15} />{m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
         ) : (
           <>
         <div className="form-group" style={{ position: "relative" }}>
@@ -2423,6 +2577,69 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           </div>
         )}
 
+        {isRoadTrip && (() => {
+          const filled = ["contactName", "contactPhone", "cost", "included", "duration", "layover", "season", "bring", "rentalCompany", "discountCode", "rentalTips"].filter(k => (trip[k] || "").trim()).length;
+          return (
+            <button type="button" className={`more-options-btn${showMoreOptions ? " open" : ""}`} onClick={() => setShowMoreOptions(v => !v)} aria-expanded={showMoreOptions}>
+              <span className="more-options-text">
+                <span className="form-lbl">Extra details</span>
+                <span className="toggle-sub">Guide contact, costs, duration, best season{tripMode === "rental" ? ", rental car" : ""} · optional</span>
+              </span>
+              {filled > 0 && <span className="more-options-count">{filled} filled</span>}
+              <Icon name={showMoreOptions ? "chevronUp" : "chevronDown"} size={18} />
+            </button>
+          );
+        })()}
+
+        {isRoadTrip && showMoreOptions && (
+          <div className="more-options-panel trip-panel">
+            <div className="trip-field-group">
+              <div className="form-lbl">Guide, driver or company</div>
+              <input className="form-inp" placeholder="Name, e.g. Abu (via James)" value={trip.contactName || ""} onChange={e => setTripField("contactName", e.target.value)} />
+              <input className="form-inp" type="tel" placeholder="Phone with country code, e.g. +250 788 747 784" value={trip.contactPhone || ""} onChange={e => setTripField("contactPhone", e.target.value)} />
+              <div className="toggle-sub">With a country code, crew can open WhatsApp with one tap.</div>
+            </div>
+            <div className="trip-field-group">
+              <div className="form-lbl">Cost</div>
+              <div className="trip-row">
+                <input className="form-inp" placeholder="e.g. $200 or 3100 INR" value={trip.cost || ""} onChange={e => setTripField("cost", e.target.value)} />
+                <input className="form-inp trip-group-inp" type="number" min="1" placeholder="Group" aria-label="Group size" value={trip.groupSize || ""} onChange={e => setTripField("groupSize", e.target.value)} />
+              </div>
+              <div className="price-chip-row">
+                {[["pp", "Per person"], ["total", "In total"]].map(([id, lbl]) => (
+                  <button key={id} type="button" className={`price-chip${trip.costBasis === id ? " active" : ""}`} onClick={() => setTripField("costBasis", trip.costBasis === id ? "" : id)}>{lbl}</button>
+                ))}
+              </div>
+              <input className="form-inp" placeholder="Included, e.g. lunch, entrance, water" value={trip.included || ""} onChange={e => setTripField("included", e.target.value)} />
+            </div>
+            <div className="trip-field-group">
+              <div className="form-lbl">Duration</div>
+              <input className="form-inp" placeholder="e.g. 06:00–20:00 or about 4 hours" value={trip.duration || ""} onChange={e => setTripField("duration", e.target.value)} />
+              <div className="price-chip-row">
+                {[["24", "Fits a 24h layover"], ["48", "Needs 48h or more"]].map(([id, lbl]) => (
+                  <button key={id} type="button" className={`price-chip${trip.layover === id ? " active" : ""}`} onClick={() => setTripField("layover", trip.layover === id ? "" : id)}>{lbl}</button>
+                ))}
+              </div>
+            </div>
+            <div className="trip-field-group">
+              <div className="form-lbl">Best time of year</div>
+              <input className="form-inp" placeholder="e.g. October and November" value={trip.season || ""} onChange={e => setTripField("season", e.target.value)} />
+            </div>
+            <div className="trip-field-group">
+              <div className="form-lbl">What to bring</div>
+              <input className="form-inp" placeholder="e.g. hiking boots, water, snacks" value={trip.bring || ""} onChange={e => setTripField("bring", e.target.value)} />
+            </div>
+            {tripMode === "rental" && (
+              <div className="trip-field-group">
+                <div className="form-lbl">Rental car</div>
+                <input className="form-inp" placeholder="Rental company, e.g. Hertz.nl (insurance included)" value={trip.rentalCompany || ""} onChange={e => setTripField("rentalCompany", e.target.value)} />
+                <input className="form-inp" placeholder="Discount code, if any" value={trip.discountCode || ""} onChange={e => setTripField("discountCode", e.target.value)} />
+                <textarea className="form-ta" rows={2} placeholder="Tips: fuel, tolls, parking, insurance…" value={trip.rentalTips || ""} onChange={e => setTripField("rentalTips", e.target.value)} />
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="form-group">
           <label className="form-lbl">Who can see this tip?</label>
           <div className="price-chip-row">
@@ -2432,25 +2649,35 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <div className="form-group">
-          <label className="form-lbl">Photo <span className="form-lbl-hint">(optional)</span></label>
-          {photo ? (
-            <div className="photo-preview-wrap">
-              <img className="photo-preview" src={photo} alt="preview" />
-              <button className="photo-remove-btn" onClick={() => setPhoto(null)}><Icon name="close" size={13} strokeWidth={2.2} />Remove</button>
+          <label className="form-lbl">Photos <span className="form-lbl-hint">(optional, up to 6)</span></label>
+          {photos.length > 0 && (
+            <div className="photo-grid">
+              {photos.map((src, i) => (
+                <div key={i} className="photo-grid-item">
+                  <img src={src} alt="" />
+                  <button type="button" className="photo-grid-remove" onClick={() => setPhotos(ps => ps.filter((_, j) => j !== i))} aria-label={`Remove photo ${i + 1}`}><Icon name="close" size={14} strokeWidth={2.4} /></button>
+                </div>
+              ))}
             </div>
-          ) : (
+          )}
+          {photos.length < 6 && (
             <label className="photo-upload-btn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:6}}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-              Add photo
-              <input type="file" accept="image/*" style={{display:"none"}} onChange={(e: any) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = ev => setPhoto(ev.target?.result as string);
-                reader.readAsDataURL(file);
+              <Icon name="image" size={16} />
+              {photos.length ? "Add more photos" : "Add photos"}
+              <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={async (e: any) => {
+                const files: File[] = Array.from(e.target.files || []);
+                e.target.value = "";
+                setPhotoError(false);
+                const room = 6 - photos.length;
+                const out: string[] = [];
+                for (const f of files.slice(0, room)) {
+                  try { out.push(await resizeImage(f)); } catch { setPhotoError(true); }
+                }
+                setPhotos(ps => [...ps, ...out].slice(0, 6));
               }} />
             </label>
           )}
+          {photoError && <div className="form-notice" style={{ color: "#B91C1C" }}>One of the photos couldn't be read. Try another one.</div>}
         </div>
 
         <div className="form-group">
@@ -2468,7 +2695,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           <label className="form-lbl">{isRoadTrip ? "Tell crew about the trip" : "Your tip about this place"}</label>
           <textarea className="form-ta" rows={isRoadTrip ? 6 : 3}
             placeholder={isRoadTrip
-              ? "Where did you go and how long did it take? What was worth a stop? Which rental company did you use, and roughly what did it cost?"
+              ? "What did you do and how did you get there? What was worth it, what would you skip, and what should the next crew know?"
               : "What makes it worth the visit? Price, hours, what to order…"}
             value={note} onChange={e => setNote(e.target.value)} />
         </div>
@@ -2482,7 +2709,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <button className="submit-btn" onClick={handleSubmit}
-          disabled={!place.trim() || !destCode || !note.trim() || !name.trim()}>
+          disabled={!place.trim() || !destCode || !note.trim() || !name.trim() || (isRoadTrip && !tripMode)}>
           Post Recommendation
         </button>
       </div>
@@ -3032,7 +3259,9 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
   const [filterSolo, setFilterSolo] = useState(false);
   const [filterQuickBite, setFilterQuickBite] = useState(false);
   const [filterCrew, setFilterCrew] = useState(false);
+  const [filterMode, setFilterMode] = useState("");
   const isFood = category === "food";
+  const isTrip = category === "roadtrip";
   const results: Array<{ tip: any; destCode: string; destCity: string }> = [];
   for (const dest of Object.values(DESTINATIONS) as any[]) {
     const allTips = [...(dest.crewTips || []), ...((addedTips[dest.code]) || [])];
@@ -3045,7 +3274,8 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
     .filter(r => !isFood || !filterJetlag || r.tip.jetlagProof)
     .filter(r => !isFood || !filterSolo || r.tip.soloFriendly)
     .filter(r => !isFood || !filterQuickBite || r.tip.quickBite)
-    .filter(r => !isFood || !filterCrew || r.tip.crewFriendly);
+    .filter(r => !isFood || !filterCrew || r.tip.crewFriendly)
+    .filter(r => !isTrip || !filterMode || r.tip.trip?.mode === filterMode);
 
   return (
     <div className="screen">
@@ -3055,6 +3285,13 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
       </div>
       <div className="content-pad">
         <div className="search-results-meta">{filteredResults.length} recent tip{filteredResults.length !== 1 ? "s" : ""}, every destination mixed together</div>
+        {isTrip && (
+          <div className="sort-filter-bar crew-filter-bar">
+            {TRIP_MODES.map(m => (
+              <button key={m.id} className={`sf-btn${filterMode === m.id ? " active" : ""}`} onClick={() => setFilterMode(v => v === m.id ? "" : m.id)}><TripModeIcon mode={m.id} size={14} />{m.label}</button>
+            ))}
+          </div>
+        )}
         {isFood && (
           <div className="sort-filter-bar crew-filter-bar">
             <button className={`sf-btn${filterJetlag ? " active" : ""}`} onClick={() => setFilterJetlag(v => !v)}><Icon name="moon" size={14} />Jetlag proof</button>
@@ -3079,7 +3316,9 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
                   </div>
                   <div className="crew-card-date">{r.tip.date}</div>
                 </div>
+                {r.tip.photos?.[0] && <img className="tip-photo" src={r.tip.photos[0]} alt="" loading="lazy" />}
                 <TipText text={r.tip.text} className="crew-card-text" />
+                {r.tip.category === "roadtrip" && <TripChips trip={r.tip.trip} />}
                 {r.tip.tags && r.tip.tags.length > 0 && (
                   <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}

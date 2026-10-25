@@ -181,6 +181,9 @@ alter table recommendations add column if not exists jetlag_proof boolean not nu
 alter table recommendations add column if not exists solo_friendly boolean not null default false;
 alter table recommendations add column if not exists quick_bite boolean not null default false;
 alter table recommendations add column if not exists crew_friendly boolean not null default false;
+-- Trips & Tours details (mode, guide contact, cost, duration, ...) and up to 6 resized photos.
+alter table recommendations add column if not exists trip jsonb;
+alter table recommendations add column if not exists photos jsonb;
 alter table recommendations add column if not exists visibility text not null default 'public';
 alter table recommendations enable row level security;
 -- visibility='connections' tips are only readable by the author and their accepted connections
