@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.20.0";
+const APP_VERSION = "1.20.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -770,9 +770,9 @@ function useTripLists(userId: string | null) {
       if (data) setLists(data.map((l: any) => ({ id: l.id, name: l.name, tipKeys: l.tip_keys || [] })));
     });
   }, [userId]);
-  async function createList(name: string): Promise<boolean> {
+  async function createList(name: string, tipKeys: string[] = []): Promise<boolean> {
     if (!userId || !name.trim()) return false;
-    const { data, error } = await supabase.from("trip_lists").insert({ user_id: userId, name: name.trim() }).select("id,name,tip_keys").maybeSingle();
+    const { data, error } = await supabase.from("trip_lists").insert({ user_id: userId, name: name.trim(), tip_keys: tipKeys }).select("id,name,tip_keys").maybeSingle();
     if (error || !data) return false;
     setLists(prev => [{ id: data.id, name: data.name, tipKeys: data.tip_keys || [] }, ...prev]);
     return true;
@@ -1430,7 +1430,7 @@ function hotelMarkerIconUrl(): string {
 const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boolean; destCode: string; category?: string; tipId?: number }> = [];
 
 // ─── HOME ──────────────────────────────────────────────────────────────────────
-function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
+function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests }) {
   const [query, setQuery] = useState("");
   const [showSugg, setShowSugg] = useState(false);
   const q = query.trim().toLowerCase();
@@ -1509,7 +1509,7 @@ function HomeScreen({ onSearch, onDestClick, addedTips, recentDests }) {
       {latestTip && (
         <div className="section-block">
           <div className="section-label">Latest from the crew</div>
-          <button className="top-tip-card" onClick={() => onDestClick(latestTip.destCode)}>
+          <button className="top-tip-card" onClick={() => onTipClick(latestTip.destCode, latestTip.tip.id, latestTip.tip.category)}>
             <div className="top-tip-dest"><CategoryIcon id={latestTip.tip.category || "other"} color={CATEGORIES.find(c => c.id === latestTip.tip.category)?.color} size={16} />{latestTip.destCity}</div>
             <TipText text={latestTip.tip.text} className="top-tip-text" />
             <div className="top-tip-author">{latestTip.tip.name}, {latestTip.tip.role}<span className="top-tip-likes"><Icon name="heart" size={14} />{latestTip.tip.likes || 0}</span></div>
@@ -1686,7 +1686,8 @@ function ConnectButton({ authorId, connections, className }: any) {
   return <button className={className} onClick={(e: any) => { e.stopPropagation(); connections.sendRequest(authorId); }}><Icon name="plus" size={14} strokeWidth={2.2} />Connect</button>;
 }
 
-function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment, onDeleteTip, isAdmin }) {
+function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment, onDeleteTip, isAdmin, tripLists }) {
+  const [listSheetKey, setListSheetKey] = useState<string | null>(null);
   const dest = DESTINATIONS[code];
   const liveWeather = useWeather(code, dest.city, dest.country);
   const [showWeather, setShowWeather] = useState(false);
@@ -1984,6 +1985,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           </div>
         );
       })()}
+      {listSheetKey && tripLists && <SaveToListSheet tipKey={listSheetKey} tripLists={tripLists} onClose={() => setListSheetKey(null)} />}
       {showCatPicker && (
         <CategoryMenu
           onClose={() => setShowCatPicker(false)}
@@ -2101,7 +2103,12 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                   )}
                   <button
                     className={`fav-btn${favorites.includes(`${code}-${tip.id}`) ? " saved" : ""}`}
-                    onClick={() => onToggleFavorite(`${code}-${tip.id}`)}
+                    onClick={() => {
+                      const key = `${code}-${tip.id}`;
+                      const wasSaved = favorites.includes(key);
+                      onToggleFavorite(key);
+                      if (!wasSaved && tripLists?.ready) setListSheetKey(key);
+                    }}
                     aria-label={favorites.includes(`${code}-${tip.id}`) ? "Remove from saved" : "Save"}>
                     <Icon name="bookmark" size={18} />
                   </button>
@@ -2849,6 +2856,51 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
 }
 
 // ─── FAVORITES ─────────────────────────────────────────────────────────────────
+function SaveToListSheet({ tipKey, tripLists, onClose }: { tipKey: string; tripLists: any; onClose: () => void }) {
+  const lists = tripLists.lists || [];
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  async function createWithTip() {
+    setBusy(true); setError(false);
+    const ok = await tripLists.createList(newName, [tipKey]);
+    setBusy(false);
+    if (ok) setNewName(""); else setError(true);
+  }
+  return (
+    <div className="donation-backdrop" role="dialog" aria-modal="true" aria-labelledby="save-list-title" onClick={onClose}>
+      <div className="donation-modal save-list-modal" onClick={e => e.stopPropagation()}>
+        <div className="save-list-head">
+          <span className="save-list-check"><Icon name="check" size={20} strokeWidth={2.4} /></span>
+          <div>
+            <div className="donation-title" id="save-list-title" style={{ margin: 0 }}>Saved</div>
+            <div className="toggle-sub">Add it to a trip list too?</div>
+          </div>
+        </div>
+        {lists.length > 0 && (
+          <div className="price-chip-row save-list-chips">
+            {lists.map((l: any) => {
+              const inList = l.tipKeys.includes(tipKey);
+              return (
+                <button key={l.id} type="button" className={`price-chip${inList ? " active" : ""}`} onClick={() => tripLists.toggleTip(l.id, tipKey)}>
+                  {inList && <Icon name="check" size={14} strokeWidth={2.2} />}{l.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="save-list-new">
+          <input className="form-inp" placeholder={lists.length ? "Or start a new list" : "New list, e.g. Mexico City, November"} value={newName}
+            onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && newName.trim() && createWithTip()} aria-label="New list name" />
+          <button type="button" className="add-btn" disabled={!newName.trim() || busy} onClick={createWithTip}><Icon name="plus" size={15} strokeWidth={2.2} />Create</button>
+        </div>
+        {error && <div className="form-notice" style={{ color: "#B91C1C" }}>Couldn't create the list. Check your connection and try again.</div>}
+        <button type="button" className="donation-btn-primary" style={{ marginTop: 16, marginBottom: 0 }} onClick={onClose}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 function resolveTipKey(key: string, addedTips: any) {
   const [code, idStr] = key.split("-");
   const dest = (DESTINATIONS as any)[code];
@@ -3961,8 +4013,8 @@ function AppContent() {
           the top and bottom nav, the same way DestScreen's own .map-overlay is bounded
           by .screen -- instead of position:fixed with a guessed/measured viewport offset. */}
       <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
-        {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} isAdmin={adminSignups.isAdmin} />}
+        {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
+        {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} isAdmin={adminSignups.isAdmin} tripLists={tripLists} />}
         {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
         {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}

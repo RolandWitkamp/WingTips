@@ -148,6 +148,14 @@
       .tip-gem-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#FBEAFD; color:#A21CAF; }
       .tip-extra-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#EEF1F5; color:var(--text3); }
       .trip-lists { margin-bottom:4px; }
+      .save-list-modal { text-align:left; }
+      .save-list-modal .donation-title { text-align:left; }
+      .save-list-head { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+      .save-list-check { width:40px; height:40px; border-radius:20px; background:#E3F6EE; color:#047857; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+      .save-list-chips { margin-bottom:12px; }
+      .save-list-new { display:flex; gap:8px; align-items:center; }
+      .save-list-new .form-inp { flex:1; min-width:0; }
+      .save-list-new .add-btn { flex-shrink:0; height:46px; }
       .yes-no-row { flex-wrap:nowrap; flex-shrink:0; }
       .trip-list-row { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
       .trip-list-card { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:0; background:var(--surface); border:none; border-radius:18px; padding:14px; box-shadow:var(--shadow); cursor:pointer; text-align:left; font-family:inherit; }
