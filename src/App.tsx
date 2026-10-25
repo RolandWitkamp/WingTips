@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.17.0";
+const APP_VERSION = "1.18.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -308,8 +308,8 @@ function tipMapsUrl(tip: any, dest: any): string {
 // Place tips are stored as "📍 Place — note"; on screen the place becomes a bold title instead.
 function splitTipText(text: string): { title: string; body: string } {
   const t = text || "";
-  if (!t.startsWith("📍")) return { title: "", body: t };
-  const rest = t.replace(/^📍\s*/, "");
+  if (!t.startsWith("📍") && !t.startsWith("🚗")) return { title: "", body: t };
+  const rest = t.replace(/^(📍|🚗)\s*/, "");
   const i = rest.indexOf("—");
   return i < 0 ? { title: rest.trim(), body: "" } : { title: rest.slice(0, i).trim(), body: rest.slice(i + 1).trim() };
 }
@@ -357,6 +357,41 @@ function DonationAmountPicker({ value, onChange }: { value: number | null; onCha
     </div>
   );
 }
+const INTRO_SEEN_KEY = "wt_intro_seen";
+function introSeen(): boolean {
+  try { return localStorage.getItem(INTRO_SEEN_KEY) === "1"; } catch { return true; }
+}
+function IntroSheet({ onClose }: { onClose: () => void }) {
+  function close() {
+    try { localStorage.setItem(INTRO_SEEN_KEY, "1"); } catch { /* shows again next time */ }
+    onClose();
+  }
+  return (
+    <div className="donation-backdrop" role="dialog" aria-modal="true" aria-labelledby="intro-title">
+      <div className="donation-modal intro-modal">
+        <div className="intro-logo">Wing<span>Tips</span></div>
+        <div className="donation-title" id="intro-title">Welcome aboard</div>
+        <p className="intro-lead">The layover guide written by crew, for crew.</p>
+        <div className="intro-points">
+          <div className="intro-point">
+            <span className="intro-point-icon"><Icon name="users" size={20} /></span>
+            <span><strong>It works because you post.</strong> Every tip here comes from a colleague. Found a good breakfast spot, gym or day trip? Share it, so the next crew on that layover doesn't have to search.</span>
+          </div>
+          <div className="intro-point">
+            <span className="intro-point-icon"><Icon name="compass" size={20} /></span>
+            <span><strong>Find what's near the crew hotel.</strong> Pick a destination, browse by category, and check the map, the weather and what's open right now.</span>
+          </div>
+          <div className="intro-point">
+            <span className="intro-point-icon"><Icon name="heart" size={20} /></span>
+            <span><strong>Free, with an optional donation.</strong> Running WingTips costs money. A small donation helps cover that, and half of every donation goes to Wings of Support.</span>
+          </div>
+        </div>
+        <button type="button" className="donation-btn-primary" onClick={close}>Let's go</button>
+      </div>
+    </div>
+  );
+}
+
 function DonationReminderCard() {
   const [due, setDue] = useState(donationReminderDue);
   const [amount, setAmount] = useState<number | null>(1);
@@ -1846,7 +1881,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                     onClick={() => setExpandedTip(isExpanded ? null : tip.id)} aria-label="Comments">
                     <Icon name="comment" size={16} />{tip.comments.length > 0 ? tip.comments.length : "Comment"}
                   </button>
-                  <a href={tipMapsUrl(tip, dest)} target="_blank" rel="noreferrer" className="maps-link"><Icon name="pin" size={16} />Maps</a>
+                  {tip.category !== "roadtrip" && <a href={tipMapsUrl(tip, dest)} target="_blank" rel="noreferrer" className="maps-link"><Icon name="pin" size={16} />Maps</a>}
                   <button className="share-btn" onClick={() => shareTip(tip, dest, () => { setCopiedTipId(tip.id); setTimeout(() => setCopiedTipId((id: any) => id === tip.id ? null : id), 1800); })}>
                     {copiedTipId === tip.id ? <><Icon name="check" size={16} />Copied</> : <><Icon name="share" size={16} />Share</>}
                   </button>
@@ -1982,6 +2017,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const justPickedRef = useRef(false);
 
   const dest = (DESTINATIONS as any)[destCode];
+  const isRoadTrip = category === "roadtrip";
   const mapsUrl = placeCoords
     ? `https://www.google.com/maps/search/?api=1&query=${placeCoords.lat},${placeCoords.lon}`
     : place && dest
@@ -2064,15 +2100,15 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
       name: name.trim(),
       role,
       category,
-      text: `📍 ${place.trim()} — ${note.trim()}`,
+      text: `${isRoadTrip ? "🚗" : "📍"} ${place.trim()} — ${note.trim()}`,
       date: new Date().toISOString().split("T")[0],
       likes: 0,
       comments: [],
     };
-    if (price) newTip.price = price;
-    if (openingHours.trim()) newTip.hours = openingHours.trim();
-    if (placeCoords) newTip.coords = placeCoords;
-    if (crewDiscount) newTip.discount = discountPct ? `${discountPct}%` : true;
+    if (!isRoadTrip && price) newTip.price = price;
+    if (!isRoadTrip && openingHours.trim()) newTip.hours = openingHours.trim();
+    if (!isRoadTrip && placeCoords) newTip.coords = placeCoords;
+    if (!isRoadTrip && crewDiscount) newTip.discount = discountPct ? `${discountPct}%` : true;
     if (category === "food" && jetlagProof) newTip.jetlagProof = true;
     if (category === "food" && soloFriendly) newTip.soloFriendly = true;
     if (category === "food" && quickBite) newTip.quickBite = true;
@@ -2227,6 +2263,28 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           </div>
         )}
 
+        <div className="form-group">
+          <label className="form-lbl">What kind of tip?</label>
+          <div className="rec-cat-row">
+            {CATEGORIES.map(c => (
+              <button key={c.id}
+                className={`rec-cat-chip${category === c.id ? " active" : ""}`}
+                onClick={() => setCategory(c.id)}>
+                <CategoryIcon id={c.id} color={category === c.id ? "#fff" : c.color} size={16} />
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isRoadTrip ? (
+          <div className="form-group">
+            <label className="form-lbl">Trip title</label>
+            <input className="form-inp" placeholder="e.g. Pacific Coast Highway, San Francisco to Big Sur"
+              value={place} onChange={e => setPlace(e.target.value)} />
+          </div>
+        ) : (
+          <>
         <div className="form-group" style={{ position: "relative" }}>
           <label className="form-lbl">Place name</label>
           <div className="place-search-row">
@@ -2284,7 +2342,10 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           )}
         </div>
 
-        {(() => {
+          </>
+        )}
+
+        {!isRoadTrip && (() => {
           const activeCount = [crewDiscount, ...(category === "food" ? [soloFriendly, quickBite, crewFriendly] : [])].filter(Boolean).length;
           return (
             <button type="button" className={`more-options-btn${showMoreOptions ? " open" : ""}`} onClick={() => setShowMoreOptions(v => !v)} aria-expanded={showMoreOptions}>
@@ -2298,7 +2359,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           );
         })()}
 
-        {showMoreOptions && (
+        {!isRoadTrip && showMoreOptions && (
           <div className="more-options-panel">
             <div className="toggle-row">
               <div>
@@ -2371,20 +2432,6 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <div className="form-group">
-          <label className="form-lbl">Category</label>
-          <div className="rec-cat-row">
-            {CATEGORIES.map(c => (
-              <button key={c.id}
-                className={`rec-cat-chip${category === c.id ? " active" : ""}`}
-                onClick={() => setCategory(c.id)}>
-                <CategoryIcon id={c.id} color={category === c.id ? "#fff" : c.color} size={16} />
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="form-group">
           <label className="form-lbl">Photo <span className="form-lbl-hint">(optional)</span></label>
           {photo ? (
             <div className="photo-preview-wrap">
@@ -2418,9 +2465,11 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <div className="form-group">
-          <label className="form-lbl">Your tip about this place</label>
-          <textarea className="form-ta" rows={3}
-            placeholder="What makes it worth the visit? Price, hours, what to order…"
+          <label className="form-lbl">{isRoadTrip ? "Tell crew about the trip" : "Your tip about this place"}</label>
+          <textarea className="form-ta" rows={isRoadTrip ? 6 : 3}
+            placeholder={isRoadTrip
+              ? "Where did you go and how long did it take? What was worth a stop? Which rental company did you use, and roughly what did it cost?"
+              : "What makes it worth the visit? Price, hours, what to order…"}
             value={note} onChange={e => setNote(e.target.value)} />
         </div>
 
@@ -2569,6 +2618,10 @@ function AccountSection() {
   return (
     <div className="account-section">
       {email && <div className="account-email">Logged in as <strong>{email}</strong></div>}
+
+      <button type="button" className="account-about-btn" onClick={() => { try { localStorage.removeItem(INTRO_SEEN_KEY); } catch {} location.reload(); }}>
+        <Icon name="sparkle" size={18} />How WingTips works<Icon name="chevronRight" size={16} className="account-about-chevron" />
+      </button>
 
       <div className="account-block">
         <div className="account-block-title">Change password</div>
@@ -3327,6 +3380,7 @@ function AppContent() {
   const [selectedCrew, setSelectedCrew] = useState<{ name: string; role: string; authorId?: string } | null>(null);
   const [showCatMenu, setShowCatMenu] = useState(false);
   const [showDestMenu, setShowDestMenu] = useState(false);
+  const [showIntro, setShowIntro] = useState(() => !introSeen());
   const topNavRef = useRef<HTMLDivElement | null>(null);
   const { notes: notifications, markAllRead } = useNotifications();
   const {
@@ -3455,6 +3509,8 @@ function AppContent() {
           />
         )}
       </div>
+
+      {showIntro && <IntroSheet onClose={() => setShowIntro(false)} />}
 
       {/* BOTTOM NAV */}
       <nav className="bottom-nav" aria-label="Main">

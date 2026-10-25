@@ -129,6 +129,17 @@
       .donation-btn-primary:disabled { background:#CBD5E1; cursor:not-allowed; }
       .donation-btn-primary:not(:disabled):hover { background:#00266A; }
       .donation-btn-skip { background:none; border:none; font-size:13px; color:var(--text2); cursor:pointer; font-family:inherit; text-decoration:underline; text-decoration-color:rgba(0,0,0,0.2); }
+      .intro-modal { text-align:left; }
+      .intro-logo { font-family:'Inter',sans-serif; font-weight:800; font-size:22px; color:var(--navy); letter-spacing:-0.5px; margin-bottom:14px; }
+      .intro-logo span { color:var(--accent); }
+      .intro-modal .donation-title { margin-bottom:4px; }
+      .intro-lead { font-size:15px; color:var(--text2); margin-bottom:20px; }
+      .intro-points { display:flex; flex-direction:column; gap:16px; margin-bottom:24px; }
+      .intro-point { display:flex; gap:12px; align-items:flex-start; font-size:14px; line-height:1.55; color:var(--text3); }
+      .intro-point strong { color:var(--text); }
+      .intro-point-icon { width:40px; height:40px; border-radius:14px; background:var(--surface2); color:var(--navy); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+      .account-about-btn { display:flex; align-items:center; gap:10px; width:100%; background:var(--surface); border:none; border-radius:18px; padding:14px 16px; font-size:15px; font-weight:700; color:var(--navy); cursor:pointer; font-family:inherit; box-shadow:var(--shadow-sm); text-align:left; }
+      .account-about-chevron { margin-left:auto; color:var(--text2); }
       .donation-btn-later { width:100%; padding:14px; background:var(--surface2); border:none; border-radius:24px; color:var(--navy); font-family:inherit; font-size:15px; font-weight:700; cursor:pointer; margin-bottom:12px; }
       .donation-note { font-size:12px; color:var(--text2); margin-top:12px; }
       .donation-reminder { background:var(--surface); border-radius:22px; padding:18px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:10px; }
