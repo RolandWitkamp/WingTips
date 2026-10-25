@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.19.1";
+const APP_VERSION = "1.20.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -313,6 +313,20 @@ function splitTipText(text: string): { title: string; body: string } {
   const i = rest.indexOf("—");
   return i < 0 ? { title: rest.trim(), body: "" } : { title: rest.slice(0, i).trim(), body: rest.slice(i + 1).trim() };
 }
+const NIGHTLIFE_TYPES = ["Bar", "Rooftop bar", "Pub", "Nightclub", "Live music", "Shows & theatre", "Karaoke"];
+function ExtrasBadges({ tip }: { tip: any }) {
+  const x = tip?.extras;
+  if (!x) return null;
+  return (
+    <>
+      {x.hiddenGem && <span className="tip-gem-badge"><CategoryIcon id="gems" size={13} color="currentColor" />Hidden gem</span>}
+      {tip.category === "fitness" && x.classes === true && <span className="tip-extra-badge"><Icon name="users" size={13} />Classes</span>}
+      {tip.category === "fitness" && x.classes === false && <span className="tip-extra-badge">No classes</span>}
+      {tip.category === "nightlife" && x.nightlifeType && <span className="tip-extra-badge"><CategoryIcon id="nightlife" size={13} color="currentColor" />{x.nightlifeType}</span>}
+    </>
+  );
+}
+
 const TRIP_MODES = [
   { id: "rental", label: "Rental car" },
   { id: "guide", label: "With a guide" },
@@ -745,6 +759,41 @@ function useAdminSignups(userEmail: string | null) {
 // map its name strings onto real accounts, so existing "connections" need to be re-sent as real
 // requests. A request from someone who already has a pending request in from you is auto-accepted
 // instead of creating a second row, since that's just two people connecting at the same time.
+// Named lists of saved tips for an upcoming trip ("Mexico next week"), stored per user.
+function useTripLists(userId: string | null) {
+  const [lists, setLists] = useState<{ id: any; name: string; tipKeys: string[] }[]>([]);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!userId) return;
+    supabase.from("trip_lists").select("id,name,tip_keys").order("created_at", { ascending: false }).then(({ data, error }) => {
+      setReady(!error);
+      if (data) setLists(data.map((l: any) => ({ id: l.id, name: l.name, tipKeys: l.tip_keys || [] })));
+    });
+  }, [userId]);
+  async function createList(name: string): Promise<boolean> {
+    if (!userId || !name.trim()) return false;
+    const { data, error } = await supabase.from("trip_lists").insert({ user_id: userId, name: name.trim() }).select("id,name,tip_keys").maybeSingle();
+    if (error || !data) return false;
+    setLists(prev => [{ id: data.id, name: data.name, tipKeys: data.tip_keys || [] }, ...prev]);
+    return true;
+  }
+  async function deleteList(id: any): Promise<boolean> {
+    const { data, error } = await supabase.from("trip_lists").delete().eq("id", id).select("id");
+    if (error || !data?.length) return false;
+    setLists(prev => prev.filter(l => l.id !== id));
+    return true;
+  }
+  async function toggleTip(id: any, key: string) {
+    const list = lists.find(l => l.id === id);
+    if (!list) return;
+    const tipKeys = list.tipKeys.includes(key) ? list.tipKeys.filter(k => k !== key) : [...list.tipKeys, key];
+    setLists(prev => prev.map(l => l.id === id ? { ...l, tipKeys } : l));
+    const { error } = await supabase.from("trip_lists").update({ tip_keys: tipKeys }).eq("id", id);
+    if (error) setLists(prev => prev.map(l => l.id === id ? list : l));
+  }
+  return { lists, ready, createList, deleteList, toggleTip };
+}
+
 function useConnections(userId: string | null) {
   const [loaded, setLoaded] = useState(false);
   const [accepted, setAccepted] = useState<{ userId: string; name: string; role: string }[]>([]);
@@ -866,6 +915,7 @@ function useRecommendations() {
       tags: r.tags || undefined,
       photos: Array.isArray(r.photos) && r.photos.length ? r.photos : (r.photo ? [r.photo] : undefined),
       trip: r.trip || undefined,
+      extras: r.extras || undefined,
       coords: r.coords || undefined,
       comments: commentsByRec[r.id] || [],
       likes: likesByRec[r.id]?.count || 0,
@@ -907,6 +957,7 @@ function useRecommendations() {
       ...(tipData.crewFriendly ? { crew_friendly: true } : {}),
       ...(tipData.photos?.length ? { photos: tipData.photos } : {}),
       ...(tipData.trip ? { trip: tipData.trip } : {}),
+      ...(tipData.extras ? { extras: tipData.extras } : {}),
     };
     const { data, error } = await supabase.from("recommendations").insert(row).select().maybeSingle();
     if (error || !data) return null;
@@ -918,7 +969,7 @@ function useRecommendations() {
       jetlagProof: data.jetlag_proof || undefined, soloFriendly: data.solo_friendly || undefined, quickBite: data.quick_bite || undefined, crewFriendly: data.crew_friendly || undefined,
       visibility: data.visibility || "public",
       tags: data.tags || undefined, coords: data.coords || undefined,
-      photos: Array.isArray(data.photos) && data.photos.length ? data.photos : undefined, trip: data.trip || undefined,
+      photos: Array.isArray(data.photos) && data.photos.length ? data.photos : undefined, trip: data.trip || undefined, extras: data.extras || undefined,
       comments: [] as any[], likes: 0, likedByMe: false,
     };
     setRecs(prev => [newTip, ...prev]);
@@ -1265,7 +1316,6 @@ const CATEGORIES = [
   { id: "nightlife",     label: "Nightlife",       color: "#6366F1" },
   { id: "accommodation", label: "Accommodation",   color: "#0EA5E9" },
   { id: "working",       label: "Working",         color: "#64748B" },
-  { id: "gems",          label: "Hidden Gems",     color: "#D946EF" },
   { id: "roadtrip",      label: "Trips & Tours",   color: "#F59E0B" },
   { id: "other",         label: "Other",           color: "#78716C" },
 ];
@@ -1610,6 +1660,19 @@ function DeleteTipButton({ onDelete, label = "Delete" }: { onDelete: () => Promi
   );
 }
 
+const DISCIPLINES = [
+  { id: "all", label: "All" },
+  { id: "cabin", label: "Cabin crew" },
+  { id: "cockpit", label: "Pilots" },
+  { id: "other", label: "Other" },
+];
+function disciplineOf(role: string): string {
+  const r = (role || "").toLowerCase();
+  if (/captain|officer|pilot/.test(r)) return "cockpit";
+  if (/purser|cabin|steward|flight attendant/.test(r)) return "cabin";
+  return "other";
+}
+
 function ConnectButton({ authorId, connections, className }: any) {
   if (!authorId || !connections?.userId) return null;
   const rel = connections.relation(authorId);
@@ -1755,10 +1818,13 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   const [filterQuickBite, setFilterQuickBite] = useState(false);
   const [filterCrew, setFilterCrew] = useState(false);
   const [filterMode, setFilterMode] = useState("");
+  const [filterGem, setFilterGem] = useState(false);
+  const [filterClasses, setFilterClasses] = useState(false);
+  const [filterNight, setFilterNight] = useState("");
   // Jetlag Proof / Solo Friendly / Quick Bite only ever make sense for food -- clear them if the
   // crew member switches category with one still active, so it can't silently keep filtering a
   // category where it no longer shows as an option.
-  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } if (activeCategory !== "roadtrip") setFilterMode(""); }, [activeCategory]);
+  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } if (activeCategory !== "roadtrip") setFilterMode(""); setFilterGem(false); setFilterClasses(false); setFilterNight(""); }, [activeCategory]);
 
   const tipsForCat = crewTips
     .filter(t => t.category === activeCategory)
@@ -1768,6 +1834,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     .filter(t => !filterQuickBite || t.quickBite)
     .filter(t => !filterCrew || t.crewFriendly)
     .filter(t => !filterMode || t.trip?.mode === filterMode)
+    .filter(t => !filterGem || t.extras?.hiddenGem)
+    .filter(t => !filterClasses || t.extras?.classes === true)
+    .filter(t => !filterNight || t.extras?.nightlifeType === filterNight)
     .slice()
     .sort((a, b) => sortBy === "liked"
       ? b.likes - a.likes
@@ -1956,6 +2025,13 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             <option value="Cabin Crew">Cabin Crew</option>
           </select>
         </div>
+        <div className="sort-filter-bar crew-filter-bar">
+          <button className={`sf-btn${filterGem ? " active" : ""}`} onClick={() => setFilterGem(v => !v)}><CategoryIcon id="gems" size={14} color="currentColor" />Hidden gems</button>
+          {activeCategory === "fitness" && <button className={`sf-btn${filterClasses ? " active" : ""}`} onClick={() => setFilterClasses(v => !v)}><Icon name="users" size={14} />Classes</button>}
+          {activeCategory === "nightlife" && NIGHTLIFE_TYPES.map(t => (
+            <button key={t} className={`sf-btn${filterNight === t ? " active" : ""}`} onClick={() => setFilterNight(v => v === t ? "" : t)}>{t}</button>
+          ))}
+        </div>
         {activeCategory === "roadtrip" && (
           <div className="sort-filter-bar crew-filter-bar">
             {TRIP_MODES.map(m => (
@@ -1992,7 +2068,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                 {tip.tags && tip.tags.length > 0 && (
                   <div className="tip-tags-row">{tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                {(tip.price || tip.hours || tip.discount || (tip.category === "food" && (tip.jetlagProof || tip.soloFriendly || tip.quickBite || tip.crewFriendly)) || tip.visibility === "connections" || (tip.coords && hotelCoords)) && (
+                {(tip.price || tip.hours || tip.discount || (tip.category === "food" && (tip.jetlagProof || tip.soloFriendly || tip.quickBite || tip.crewFriendly)) || tip.extras || tip.visibility === "connections" || (tip.coords && hotelCoords)) && (
                   <div className="tip-meta-row">
                     {tip.price && <span className="tip-price-badge">{tip.price === "Free" ? "Free" : tip.price}</span>}
                     {tip.hours && <TipHoursBadges hours={tip.hours} code={code} />}
@@ -2001,6 +2077,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                     {tip.category === "food" && tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}
                     {tip.category === "food" && tip.quickBite && <span className="tip-quickbite-badge"><Icon name="bolt" size={13} />Quick bite</span>}
                     {tip.category === "food" && tip.crewFriendly && <span className="tip-crew-badge"><Icon name="plane" size={13} />Crew friendly</span>}
+                    <ExtrasBadges tip={tip} />
                     {tip.visibility === "connections" && <span className="tip-private-badge"><Icon name="lock" size={13} />Connections only</span>}
                     {tip.coords && hotelCoords && (
                       <span className="tip-distance-badge"><Icon name="hotel" size={13} />{fmtDistance(distanceKm({ lat: parseFloat(tip.coords.lat), lng: parseFloat(tip.coords.lon) }, hotelCoords))} from crew hotel</span>
@@ -2132,6 +2209,9 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [soloFriendly, setSoloFriendly] = useState(false);
   const [quickBite, setQuickBite] = useState(false);
   const [crewFriendly, setCrewFriendly] = useState(false);
+  const [hiddenGem, setHiddenGem] = useState(false);
+  const [classes, setClasses] = useState<"" | "yes" | "no">("");
+  const [nightlifeType, setNightlifeType] = useState("");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [visibility, setVisibility] = useState<"public" | "connections">("public");
   const [tags, setTags] = useState("");
@@ -2231,13 +2311,13 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   }
 
   function handleSubmit() {
-    if (!place.trim() || !destCode || !note.trim() || !name.trim() || (isRoadTrip && !tripMode)) return;
+    if (!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && !tripMode)) return;
     const newTip: any = {
       id: Date.now(),
       name: name.trim(),
       role,
       category,
-      text: `${isRoadTrip ? "🚗" : "📍"} ${place.trim()} — ${note.trim()}`,
+      text: note.trim() ? `${isRoadTrip ? "🚗" : "📍"} ${place.trim()} — ${note.trim()}` : `${isRoadTrip ? "🚗" : "📍"} ${place.trim()}`,
       date: new Date().toISOString().split("T")[0],
       likes: 0,
       comments: [],
@@ -2252,6 +2332,11 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     if (category === "food" && crewFriendly) newTip.crewFriendly = true;
     newTip.visibility = visibility;
     if (photos.length) newTip.photos = photos;
+    const extras: Record<string, any> = {};
+    if (hiddenGem) extras.hiddenGem = true;
+    if (category === "fitness" && classes) extras.classes = classes === "yes";
+    if (category === "nightlife" && nightlifeType) extras.nightlifeType = nightlifeType;
+    if (Object.keys(extras).length) newTip.extras = extras;
     if (isRoadTrip) {
       const keep = ["contactName", "contactPhone", "cost", "costBasis", "groupSize", "included", "duration", "layover", "season", "bring",
         ...(tripMode === "rental" ? ["rentalCompany", "discountCode", "rentalTips"] : [])];
@@ -2421,6 +2506,17 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
           </div>
         </div>
 
+        {category === "nightlife" && (
+          <div className="form-group">
+            <label className="form-lbl">What kind of place? <span className="form-lbl-hint">(optional)</span></label>
+            <div className="price-chip-row">
+              {NIGHTLIFE_TYPES.map(t => (
+                <button key={t} type="button" className={`price-chip${nightlifeType === t ? " active" : ""}`} onClick={() => setNightlifeType(v => v === t ? "" : t)}>{t}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isRoadTrip ? (
           <>
             <div className="form-group">
@@ -2502,12 +2598,12 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         )}
 
         {!isRoadTrip && (() => {
-          const activeCount = [crewDiscount, ...(category === "food" ? [soloFriendly, quickBite, crewFriendly] : [])].filter(Boolean).length;
+          const activeCount = [crewDiscount, hiddenGem, category === "fitness" && !!classes, ...(category === "food" ? [soloFriendly, quickBite, crewFriendly] : [])].filter(Boolean).length;
           return (
             <button type="button" className={`more-options-btn${showMoreOptions ? " open" : ""}`} onClick={() => setShowMoreOptions(v => !v)} aria-expanded={showMoreOptions}>
               <span className="more-options-text">
                 <span className="form-lbl">Extra details</span>
-                <span className="toggle-sub">{category === "food" ? "Crew discount, solo dining, quick bite, crew friendly" : "Crew discount"} · optional</span>
+                <span className="toggle-sub">{category === "food" ? "Hidden gem, crew discount, solo dining, quick bite, crew friendly" : category === "fitness" ? "Hidden gem, classes, crew discount" : "Hidden gem, crew discount"} · optional</span>
               </span>
               {activeCount > 0 && <span className="more-options-count">{activeCount} on</span>}
               <Icon name={showMoreOptions ? "chevronUp" : "chevronDown"} size={18} />
@@ -2517,6 +2613,29 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
 
         {!isRoadTrip && showMoreOptions && (
           <div className="more-options-panel">
+            <div className="toggle-row">
+              <div>
+                <div className="form-lbl">Hidden gem</div>
+                <div className="toggle-sub">A place most visitors don't know about</div>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={hiddenGem} onChange={e => setHiddenGem(e.target.checked)} />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
+            </div>
+            {category === "fitness" && (
+              <div className="toggle-row">
+                <div>
+                  <div className="form-lbl">Classes</div>
+                  <div className="toggle-sub">Group classes like yoga, spinning or HIIT</div>
+                </div>
+                <div className="price-chip-row yes-no-row">
+                  {([["yes", "Yes"], ["no", "No"]] as const).map(([id, lbl]) => (
+                    <button key={id} type="button" className={`price-chip${classes === id ? " active" : ""}`} onClick={() => setClasses(v => v === id ? "" : id)}>{lbl}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="toggle-row">
               <div>
                 <div className="form-lbl">Crew discount</div>
@@ -2580,12 +2699,12 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         )}
 
         {isRoadTrip && (() => {
-          const filled = ["contactName", "contactPhone", "cost", "included", "duration", "layover", "season", "bring", "rentalCompany", "discountCode", "rentalTips"].filter(k => (trip[k] || "").trim()).length;
+          const filled = ["contactName", "contactPhone", "cost", "included", "duration", "layover", "season", "bring", "rentalCompany", "discountCode", "rentalTips"].filter(k => (trip[k] || "").trim()).length + (hiddenGem ? 1 : 0);
           return (
             <button type="button" className={`more-options-btn${showMoreOptions ? " open" : ""}`} onClick={() => setShowMoreOptions(v => !v)} aria-expanded={showMoreOptions}>
               <span className="more-options-text">
                 <span className="form-lbl">Extra details</span>
-                <span className="toggle-sub">Guide contact, costs, duration, best season{tripMode === "rental" ? ", rental car" : ""} · optional</span>
+                <span className="toggle-sub">Hidden gem, guide contact, costs, duration, best season{tripMode === "rental" ? ", rental car" : ""} · optional</span>
               </span>
               {filled > 0 && <span className="more-options-count">{filled} filled</span>}
               <Icon name={showMoreOptions ? "chevronUp" : "chevronDown"} size={18} />
@@ -2595,6 +2714,16 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
 
         {isRoadTrip && showMoreOptions && (
           <div className="more-options-panel trip-panel">
+            <div className="toggle-row">
+              <div>
+                <div className="form-lbl">Hidden gem</div>
+                <div className="toggle-sub">A place most visitors don't know about</div>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={hiddenGem} onChange={e => setHiddenGem(e.target.checked)} />
+                <span className="toggle-track"><span className="toggle-thumb" /></span>
+              </label>
+            </div>
             <div className="trip-field-group">
               <div className="form-lbl">Guide, driver or company</div>
               <input className="form-inp" placeholder="Name, e.g. Abu (via James)" value={trip.contactName || ""} onChange={e => setTripField("contactName", e.target.value)} />
@@ -2694,7 +2823,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <div className="form-group">
-          <label className="form-lbl">{isRoadTrip ? "Tell crew about the trip" : "Your tip about this place"}</label>
+          <label className="form-lbl">{isRoadTrip ? <>Tell crew about the trip <span className="form-lbl-hint">(optional)</span></> : "Your tip about this place"}</label>
           <textarea className="form-ta" rows={isRoadTrip ? 6 : 3}
             placeholder={isRoadTrip
               ? "What did you do and how did you get there? What was worth it, what would you skip, and what should the next crew know?"
@@ -2711,7 +2840,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <button className="submit-btn" onClick={handleSubmit}
-          disabled={!place.trim() || !destCode || !note.trim() || !name.trim() || (isRoadTrip && !tripMode)}>
+          disabled={!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && !tripMode)}>
           Post Recommendation
         </button>
       </div>
@@ -2720,31 +2849,99 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
 }
 
 // ─── FAVORITES ─────────────────────────────────────────────────────────────────
-function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, addedTips }) {
-  const savedTips = favorites.map((key: string) => {
-    const [code, idStr] = key.split("-");
-    const dest = (DESTINATIONS as any)[code];
-    if (!dest) return null;
-    const allTips = [...(dest.crewTips || []), ...((addedTips[code]) || [])];
-    const tip = allTips.find(t => String(t.id) === idStr);
-    if (!tip) return null;
-    return { key, code, dest, tip };
-  }).filter(Boolean);
+function resolveTipKey(key: string, addedTips: any) {
+  const [code, idStr] = key.split("-");
+  const dest = (DESTINATIONS as any)[code];
+  if (!dest) return null;
+  const tip = [...(dest.crewTips || []), ...((addedTips[code]) || [])].find((t: any) => String(t.id) === idStr);
+  return tip ? { key, code, dest, tip } : null;
+}
+
+function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, addedTips, tripLists }) {
+  const [openListId, setOpenListId] = useState<any>(null);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [listError, setListError] = useState("");
+  const lists = tripLists?.lists || [];
+  const openList = lists.find((l: any) => l.id === openListId) || null;
+  const keys: string[] = openList ? openList.tipKeys : favorites;
+  const shownTips = keys.map((k: string) => resolveTipKey(k, addedTips)).filter(Boolean) as any[];
+
+  async function submitNewList() {
+    setListError("");
+    const ok = await tripLists.createList(newName);
+    if (ok) { setNewName(""); setCreating(false); }
+    else setListError("Couldn't create the list. Check your connection and try again.");
+  }
 
   return (
     <div className="screen">
       <div className="screen-topbar">
-        <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>
-        <div className="screen-topbar-title">Saved Tips</div>
+        {openList
+          ? <button className="back-btn-flat" onClick={() => { setOpenListId(null); setConfirmDelete(false); }}><Icon name="back" size={18} />Saved</button>
+          : <button className="back-btn-flat" onClick={onBack}><Icon name="back" size={18} />Back</button>}
+        <div className="screen-topbar-title">{openList ? openList.name : "Saved Tips"}</div>
       </div>
-      {savedTips.length === 0
-        ? <div className="screen-center">
-            <div style={{ marginBottom: 16 }}><Icon name="bookmark" size={40} color="var(--accent)" strokeWidth={1.6} /></div>
-            <div style={{ color: "var(--text2)", fontSize: 14 }}>No saved tips yet.</div>
-            <div style={{ color: "var(--text2)", fontSize: 12, marginTop: 6 }}>Tap the bookmark on any crew tip to save it here.</div>
+
+      <div className="content-pad">
+        {!openList && tripLists?.ready && (
+          <div className="trip-lists">
+            <div className="section-label" style={{ marginBottom: 10 }}>Trip lists</div>
+            <div className="trip-list-row">
+              {lists.map((l: any) => (
+                <button key={l.id} type="button" className="trip-list-card" onClick={() => setOpenListId(l.id)}>
+                  <Icon name="bookmark" size={18} color="var(--navy)" />
+                  <span className="trip-list-name">{l.name}</span>
+                  <span className="trip-list-count">{l.tipKeys.length} tip{l.tipKeys.length !== 1 ? "s" : ""}</span>
+                </button>
+              ))}
+              {!creating && (
+                <button type="button" className="trip-list-card trip-list-new" onClick={() => setCreating(true)}>
+                  <Icon name="plus" size={18} />
+                  <span className="trip-list-name">New list</span>
+                  <span className="trip-list-count">e.g. Mexico next week</span>
+                </button>
+              )}
+            </div>
+            {creating && (
+              <div className="trip-list-create">
+                <input className="form-inp" autoFocus placeholder="Name your list, e.g. Mexico City, November" value={newName}
+                  onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === "Enter" && submitNewList()} />
+                <div className="trip-list-create-actions">
+                  <button type="button" className="add-btn" disabled={!newName.trim()} onClick={submitNewList}>Create list</button>
+                  <button type="button" className="delete-confirm-no" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</button>
+                </div>
+              </div>
+            )}
+            {listError && <div className="form-notice" style={{ color: "#B91C1C", marginTop: 8 }}>{listError}</div>}
+            <div className="section-label" style={{ margin: "22px 0 10px" }}>All saved</div>
           </div>
-        : <div className="content-pad">
-            {savedTips.map(({ key, code, dest, tip }) => (
+        )}
+
+        {openList && (
+          <div className="trip-list-head">
+            <span className="search-results-meta" style={{ margin: 0 }}>{shownTips.length} tip{shownTips.length !== 1 ? "s" : ""} in this list</span>
+            {confirmDelete ? (
+              <span className="delete-confirm">
+                <span className="delete-confirm-q">Delete this list?</span>
+                <button type="button" className="delete-confirm-yes" onClick={async () => { if (await tripLists.deleteList(openList.id)) { setOpenListId(null); setConfirmDelete(false); } }}>Delete</button>
+                <button type="button" className="delete-confirm-no" onClick={() => setConfirmDelete(false)}>Cancel</button>
+              </span>
+            ) : (
+              <button type="button" className="delete-tip-btn" onClick={() => setConfirmDelete(true)}><Icon name="trash" size={16} />Delete list</button>
+            )}
+          </div>
+        )}
+
+        {shownTips.length === 0
+          ? <div className="screen-center" style={{ minHeight: 240, padding: "32px 16px" }}>
+              <div style={{ marginBottom: 16 }}><Icon name="bookmark" size={40} color="var(--accent)" strokeWidth={1.6} /></div>
+              <div style={{ color: "var(--text2)", fontSize: 14 }}>{openList ? "This list is empty." : "No saved tips yet."}</div>
+              <div style={{ color: "var(--text2)", fontSize: 12, marginTop: 6 }}>{openList ? "Go back to Saved and use Add to list on a tip." : "Tap the bookmark on any crew tip to save it here."}</div>
+            </div>
+          : shownTips.map(({ key, code, dest, tip }) => (
               <div key={key} className="crew-card">
                 <button className="fav-dest-label" onClick={() => onDestClick(code)}>
                   <CategoryIcon id={tip.category || "other"} color={CATEGORIES.find(c => c.id === tip.category)?.color} size={15} />{dest.city}
@@ -2758,11 +2955,32 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, add
                   <div className="crew-card-date">{tip.date}</div>
                 </div>
                 <TipText text={tip.text} className="crew-card-text" />
-                <button className="fav-btn saved" onClick={() => onToggleFavorite(key)}><Icon name="bookmark" size={16} />Remove</button>
+                <div className="tip-actions">
+                  {openList
+                    ? <button className="fav-btn" onClick={() => tripLists.toggleTip(openList.id, key)}><Icon name="close" size={16} />Remove from list</button>
+                    : <>
+                        <button className="fav-btn saved" onClick={() => onToggleFavorite(key)}><Icon name="bookmark" size={16} />Remove</button>
+                        {tripLists?.ready && <button className="fav-btn" onClick={() => setPickerFor(pickerFor === key ? null : key)} aria-expanded={pickerFor === key}><Icon name="plus" size={16} />Add to list</button>}
+                      </>}
+                </div>
+                {!openList && pickerFor === key && (
+                  <div className="list-picker">
+                    {lists.length === 0
+                      ? <div className="toggle-sub">No lists yet. Create one under Trip lists above.</div>
+                      : lists.map((l: any) => {
+                          const inList = l.tipKeys.includes(key);
+                          return (
+                            <button key={l.id} type="button" className={`price-chip${inList ? " active" : ""}`} onClick={() => tripLists.toggleTip(l.id, key)}>
+                              {inList && <Icon name="check" size={14} strokeWidth={2.2} />}{l.name}
+                            </button>
+                          );
+                        })}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
-      }
+            ))
+        }
+      </div>
     </div>
   );
 }
@@ -2899,6 +3117,8 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
     return () => clearTimeout(timer);
   }, [connSearch]);
 
+  const [connDiscipline, setConnDiscipline] = useState("all");
+  const byDiscipline = (r: any) => connDiscipline === "all" || disciplineOf(r.role) === connDiscipline;
   const myTips = Object.entries(addedTips as Record<string, any[]>).flatMap(([code, tips]) =>
     tips.filter((t: any) => t.name === profile.name).map(t => ({ ...t, destCode: code, destCity: (DESTINATIONS as any)[code]?.city || code }))
   );
@@ -3000,7 +3220,7 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
                 {connections.incoming.length > 0 && (
                   <div className="conn-requests-block">
                     <div className="conn-requests-label">Connection requests</div>
-                    {connections.incoming.map((r: any) => (
+                    {connections.incoming.filter(byDiscipline).map((r: any) => (
                       <div key={r.reqId} className="connection-card">
                         <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
                         <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
@@ -3019,11 +3239,16 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
                   value={connSearch}
                   onChange={(e: any) => setConnSearch(e.target.value)}
                 />
+                <div className="sort-filter-bar crew-filter-bar">
+                  {DISCIPLINES.map(d => (
+                    <button key={d.id} className={`sf-btn${connDiscipline === d.id ? " active" : ""}`} onClick={() => setConnDiscipline(d.id)}>{d.label}</button>
+                  ))}
+                </div>
                 {connSearch.trim().length >= 2 ? (
                   <>
                     {userSearchLoading && <div className="no-tips">Searching…</div>}
-                    {!userSearchLoading && userSearchResults?.length === 0 && <div className="no-tips">No crew members found for "{connSearch.trim()}".</div>}
-                    {!userSearchLoading && userSearchResults?.map((r: any) => (
+                    {!userSearchLoading && userSearchResults?.filter(byDiscipline).length === 0 && <div className="no-tips">No crew members found for "{connSearch.trim()}".</div>}
+                    {!userSearchLoading && userSearchResults?.filter(byDiscipline).map((r: any) => (
                       <div key={r.userId} className="connection-card">
                         <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
                         <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
@@ -3038,7 +3263,7 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
                   <>
                     {connections.accepted.length === 0 && connections.outgoing.length === 0 && connections.incoming.length === 0
                       ? <div className="no-tips">No connections yet — search above, or tap Connect on a crew tip to add someone.</div>
-                      : connections.accepted.map((r: any) => (
+                      : connections.accepted.filter(byDiscipline).map((r: any) => (
                           <div key={r.reqId} className="connection-card">
                             <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
                             <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
@@ -3052,7 +3277,7 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
                     {connections.outgoing.length > 0 && (
                       <>
                         <div className="conn-requests-label" style={{marginTop:18}}>Pending — waiting for them to accept</div>
-                        {connections.outgoing.map((r: any) => (
+                        {connections.outgoing.filter(byDiscipline).map((r: any) => (
                           <div key={r.reqId} className="connection-card">
                             <button className="crew-av crew-av-btn" onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>{r.name[0]}</button>
                             <div className="connection-info" style={{cursor:"pointer"}} onClick={() => onCrewClick && onCrewClick({ name: r.name, role: r.role, authorId: r.userId })}>
@@ -3262,6 +3487,9 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
   const [filterQuickBite, setFilterQuickBite] = useState(false);
   const [filterCrew, setFilterCrew] = useState(false);
   const [filterMode, setFilterMode] = useState("");
+  const [filterGem, setFilterGem] = useState(false);
+  const [filterClasses, setFilterClasses] = useState(false);
+  const [filterNight, setFilterNight] = useState("");
   const isFood = category === "food";
   const isTrip = category === "roadtrip";
   const results: Array<{ tip: any; destCode: string; destCity: string }> = [];
@@ -3277,7 +3505,10 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
     .filter(r => !isFood || !filterSolo || r.tip.soloFriendly)
     .filter(r => !isFood || !filterQuickBite || r.tip.quickBite)
     .filter(r => !isFood || !filterCrew || r.tip.crewFriendly)
-    .filter(r => !isTrip || !filterMode || r.tip.trip?.mode === filterMode);
+    .filter(r => !isTrip || !filterMode || r.tip.trip?.mode === filterMode)
+    .filter(r => !filterGem || r.tip.extras?.hiddenGem)
+    .filter(r => !filterClasses || r.tip.extras?.classes === true)
+    .filter(r => !filterNight || r.tip.extras?.nightlifeType === filterNight);
 
   return (
     <div className="screen">
@@ -3287,6 +3518,13 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
       </div>
       <div className="content-pad">
         <div className="search-results-meta">{filteredResults.length} recent tip{filteredResults.length !== 1 ? "s" : ""}, every destination mixed together</div>
+        <div className="sort-filter-bar crew-filter-bar">
+          <button className={`sf-btn${filterGem ? " active" : ""}`} onClick={() => setFilterGem(v => !v)}><CategoryIcon id="gems" size={14} color="currentColor" />Hidden gems</button>
+          {category === "fitness" && <button className={`sf-btn${filterClasses ? " active" : ""}`} onClick={() => setFilterClasses(v => !v)}><Icon name="users" size={14} />Classes</button>}
+          {category === "nightlife" && NIGHTLIFE_TYPES.map(t => (
+            <button key={t} className={`sf-btn${filterNight === t ? " active" : ""}`} onClick={() => setFilterNight(v => v === t ? "" : t)}>{t}</button>
+          ))}
+        </div>
         {isTrip && (
           <div className="sort-filter-bar crew-filter-bar">
             {TRIP_MODES.map(m => (
@@ -3324,12 +3562,13 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
                 {r.tip.tags && r.tip.tags.length > 0 && (
                   <div className="tip-tags-row">{r.tip.tags.map((tag: string, ti: number) => <span key={ti} className="tip-tag">#{tag}</span>)}</div>
                 )}
-                {((isFood && (r.tip.jetlagProof || r.tip.soloFriendly || r.tip.quickBite || r.tip.crewFriendly)) || r.tip.visibility === "connections") && (
+                {((isFood && (r.tip.jetlagProof || r.tip.soloFriendly || r.tip.quickBite || r.tip.crewFriendly)) || r.tip.extras || r.tip.visibility === "connections") && (
                   <div className="tip-meta-row">
                     {isFood && r.tip.jetlagProof && <span className="tip-jetlag-badge"><Icon name="moon" size={13} />Jetlag proof</span>}
                     {isFood && r.tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}
                     {isFood && r.tip.quickBite && <span className="tip-quickbite-badge"><Icon name="bolt" size={13} />Quick bite</span>}
                     {isFood && r.tip.crewFriendly && <span className="tip-crew-badge"><Icon name="plane" size={13} />Crew friendly</span>}
+                    <ExtrasBadges tip={r.tip} />
                     {r.tip.visibility === "connections" && <span className="tip-private-badge"><Icon name="lock" size={13} />Connections only</span>}
                   </div>
                 )}
@@ -3633,6 +3872,7 @@ function AppContent() {
   const adminSignups = useAdminSignups(userEmail);
   const unreadCount = notifications.filter(n => !n.read).length + adminSignups.unseenCount;
   const connections = useConnections(userId);
+  const tripLists = useTripLists(userId);
   const { byDest: addedTips, loaded: recsLoaded, addRecommendation, toggleLike, addComment, deleteRecommendation, reload: reloadRecs } = useRecommendations();
 
   useEffect(() => {
@@ -3727,7 +3967,7 @@ function AppContent() {
         {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
-        {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} />}
+        {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} tripLists={tripLists} />}
         {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} onDeleteTip={deleteRecommendation} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
         {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} addedTips={addedTips} />}
 

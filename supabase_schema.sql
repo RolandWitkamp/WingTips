@@ -184,6 +184,20 @@ alter table recommendations add column if not exists crew_friendly boolean not n
 -- Trips & Tours details (mode, guide contact, cost, duration, ...) and up to 6 resized photos.
 alter table recommendations add column if not exists trip jsonb;
 alter table recommendations add column if not exists photos jsonb;
+-- Per-category extras: hiddenGem (any category), classes (fitness), nightlifeType (nightlife).
+alter table recommendations add column if not exists extras jsonb;
+
+-- Named lists of saved tips for an upcoming trip, private to their owner.
+create table if not exists trip_lists (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  tip_keys text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+alter table trip_lists enable row level security;
+drop policy if exists "trip_lists_own" on trip_lists;
+create policy "trip_lists_own" on trip_lists for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 alter table recommendations add column if not exists visibility text not null default 'public';
 alter table recommendations enable row level security;
 -- visibility='connections' tips are only readable by the author and their accepted connections
