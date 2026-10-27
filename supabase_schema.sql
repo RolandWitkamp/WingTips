@@ -221,6 +221,8 @@ drop policy if exists "recommendations_insert_own" on recommendations;
 create policy "recommendations_insert_own" on recommendations for insert with check (auth.uid() = author_id);
 drop policy if exists "recommendations_delete_own" on recommendations;
 create policy "recommendations_delete_own" on recommendations for delete using (auth.uid() = author_id);
+drop policy if exists "recommendations_update_own" on recommendations;
+create policy "recommendations_update_own" on recommendations for update using (auth.uid() = author_id) with check (auth.uid() = author_id);
 -- The app owner can remove anyone's tip (moderation); same single-owner email check as admin_signup_log.
 drop policy if exists "recommendations_delete_admin" on recommendations;
 create policy "recommendations_delete_admin" on recommendations for delete using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');

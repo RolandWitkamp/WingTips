@@ -440,6 +440,8 @@
         .my-tip-footer { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
         .delete-tip-btn { display:inline-flex; align-items:center; gap:5px; height:34px; padding:0 10px; background:none; border:none; border-radius:17px; font-size:13px; font-weight:600; color:var(--text2); cursor:pointer; font-family:inherit; }
         .delete-tip-btn:hover { background:#FDECEC; color:#B91C1C; }
+        .edit-tip-btn:hover { background:var(--surface2); color:var(--navy); }
+        .my-tip-actions { display:inline-flex; align-items:center; gap:2px; flex-wrap:wrap; }
         .delete-confirm { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
         .delete-confirm-q { font-size:13px; font-weight:600; color:#B91C1C; }
         .delete-confirm-yes { height:32px; padding:0 14px; border:none; border-radius:16px; background:#DC2626; color:#fff; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; }
