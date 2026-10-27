@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.23.0";
+const APP_VERSION = "1.23.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -1078,7 +1078,9 @@ function useRecommendations() {
       extras: tipData.extras || null,
     };
     const { data, error } = await supabase.from("recommendations").update(row).eq("id", tipId).select().maybeSingle();
-    if (error || !data) return null;
+    if (error) return { failed: "network" as const };
+    // No error but no row back: row-level security refused the update.
+    if (!data) return { failed: "denied" as const };
     let updated: any = null;
     setRecs(prev => prev.map(r => {
       if (r.id !== tipId) return r;
@@ -2318,7 +2320,7 @@ function osmCategoryGuess(cls: string, type: string): string {
 
 function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, profile, defaultCategory, editTip }: {
   onBack: () => void; selectedDest: any; onSubmit: (code: string, tip: any) => Promise<boolean>;
-  onUpdate?: (tipId: any, code: string, tip: any) => Promise<boolean>; profile: any; defaultCategory: any; editTip?: any;
+  onUpdate?: (tipId: any, code: string, tip: any) => Promise<true | "network" | "denied">; profile: any; defaultCategory: any; editTip?: any;
 }) {
   const e0: any = editTip || null;
   const e0Text = e0 ? splitTipText(e0.text) : null;
@@ -2507,12 +2509,13 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     setShowDonation(true);
   }
 
+  const [editError, setEditError] = useState<"" | "network" | "denied">("");
   async function saveEdit(newTip: any) {
     if (submitting) return;
-    setSubmitting(true); setSubmitError(false);
-    const ok = onUpdate ? await onUpdate(e0.id, destCode, newTip) : false;
+    setSubmitting(true); setEditError("");
+    const result = onUpdate ? await onUpdate(e0.id, destCode, newTip) : "network";
     setSubmitting(false);
-    if (!ok) setSubmitError(true);
+    if (result !== true) setEditError(result);
   }
 
   async function finalize(choice: "donate" | "later" | "skip") {
@@ -3025,7 +3028,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
           </div>
         </div>
 
-        {e0 && submitError && <p className="donation-error">Couldn't save your changes. Check your connection and try again.</p>}
+        {e0 && editError === "network" && <p className="donation-error">Couldn't save your changes. Check your connection and try again.</p>}
+        {e0 && editError === "denied" && <p className="donation-error">The database didn't allow this change. You can only edit your own tips; if this is your tip, editing still needs to be switched on in the database.</p>}
         <button className="submit-btn" onClick={handleSubmit}
           disabled={!place.trim() || !destCode || !name.trim() || (isRoadTrip && tripModesSel.length === 0)}>
           {e0 ? (submitting ? "Saving…" : "Save changes") : "Post Recommendation"}
@@ -4171,9 +4175,9 @@ function AppContent() {
   }, [screen]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  async function handleRecommendationUpdated(tipId: any, code: string, tip: any) {
-    const saved = await updateRecommendation(tipId, code, tip);
-    if (!saved) return false;
+  async function handleRecommendationUpdated(tipId: any, code: string, tip: any): Promise<true | "network" | "denied"> {
+    const saved: any = await updateRecommendation(tipId, code, tip);
+    if (!saved || saved.failed) return saved?.failed || "network";
     setEditingTip(null);
     setSelectedDest(code);
     setActiveCategory(tip.category);
