@@ -116,13 +116,15 @@
       .trip-contact-icon { width:36px; height:36px; border-radius:12px; background:var(--surface); color:var(--navy); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
       .trip-contact-text { flex:1; min-width:0; display:flex; flex-direction:column; }
       .trip-contact-name { font-size:14px; font-weight:700; color:var(--text); overflow-wrap:anywhere; }
-      .trip-contact-phone { font-size:12px; color:var(--text2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+      .trip-contact-phone { font-size:12px; color:var(--text2); font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .trip-contact-btn { display:inline-flex; align-items:center; gap:5px; height:36px; padding:0 12px; border-radius:18px; background:#E3F6EE; color:#047857; font-size:13px; font-weight:700; text-decoration:none; flex-shrink:0; }
       .trip-contact-call { width:36px; padding:0; justify-content:center; background:var(--surface2); color:var(--navy); }
       .trip-panel { gap:20px; }
       .trip-field-group { display:flex; flex-direction:column; gap:8px; }
       .trip-row { display:flex; gap:8px; }
       .trip-group-inp { width:96px !important; flex-shrink:0; }
+      .trip-currency { width:92px !important; flex-shrink:0; padding-right:8px !important; }
+      .trip-eur-hint { font-weight:600; color:var(--navy); }
       .tip-photos { display:grid; gap:4px; border-radius:16px; overflow:hidden; margin-bottom:12px; }
       .tip-photos-1 { grid-template-columns:1fr; }
       .tip-photos-2 { grid-template-columns:1fr 1fr; }

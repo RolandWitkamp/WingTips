@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.20.3";
+const APP_VERSION = "1.21.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -333,6 +333,72 @@ const TRIP_MODES = [
   { id: "transport", label: "Taxi or transport" },
   { id: "foot", label: "On foot" },
 ];
+// Trips used to store one `mode`; they now store `modes` (several at once, e.g. guide + taxi).
+function tripModes(trip: any): string[] {
+  if (!trip) return [];
+  if (Array.isArray(trip.modes)) return trip.modes;
+  return trip.mode ? [trip.mode] : [];
+}
+
+const COUNTRY_CURRENCY: Record<string, string> = {
+  "Argentina": "ARS", "Aruba": "AWG", "Australia": "AUD", "Austria": "EUR", "Belgium": "EUR", "Bonaire": "USD",
+  "Brazil": "BRL", "Canada": "CAD", "Chile": "CLP", "China (SAR)": "HKD", "China": "CNY", "Colombia": "COP",
+  "Costa Rica": "CRC", "Croatia": "EUR", "Curaçao": "XCG", "Czech Republic": "CZK", "Denmark": "DKK", "Ecuador": "USD",
+  "Finland": "EUR", "France": "EUR", "Germany": "EUR", "Ghana": "GHS", "Guyana": "GYD", "Hungary": "HUF", "India": "INR",
+  "Indonesia": "IDR", "Ireland": "EUR", "Italy": "EUR", "Japan": "JPY", "Kenya": "KES", "Luxembourg": "EUR",
+  "Malaysia": "MYR", "Mexico": "MXN", "Netherlands": "EUR", "Nigeria": "NGN", "North Macedonia": "MKD", "Norway": "NOK",
+  "Panama": "USD", "Peru": "PEN", "Philippines": "PHP", "Poland": "PLN", "Portugal": "EUR", "Rwanda": "RWF",
+  "Saudi Arabia": "SAR", "Serbia": "RSD", "Singapore": "SGD", "Sint Maarten / Saint-Martin": "XCG", "Slovenia": "EUR",
+  "South Africa": "ZAR", "South Korea": "KRW", "Spain": "EUR", "Suriname": "SRD", "Sweden": "SEK", "Switzerland": "CHF",
+  "Taiwan": "TWD", "Tanzania": "TZS", "Thailand": "THB", "Trinidad & Tobago": "TTD", "Uganda": "UGX",
+  "United Arab Emirates": "AED", "United Kingdom": "GBP", "United States": "USD",
+};
+function currencyOptions(country?: string): string[] {
+  const local = (country && COUNTRY_CURRENCY[country]) || "";
+  const rest = Array.from(new Set(Object.values(COUNTRY_CURRENCY))).filter(c => !["EUR", "USD", "GBP", local].includes(c)).sort();
+  return Array.from(new Set([local, "EUR", "USD", "GBP", ...rest].filter(Boolean)));
+}
+function fmtMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency, maximumFractionDigits: amount % 1 ? 2 : 0 }).format(amount);
+  } catch { return `${amount} ${currency}`; }
+}
+
+// Daily exchange rates (units per 1 EUR) from open.er-api.com: free, no key, ~160 currencies.
+// Cached per device for 12 hours and shared by every price on screen.
+const FX_KEY = "wt_fx_eur";
+let fxPromise: Promise<Record<string, number> | null> | null = null;
+function loadEurRates(): Promise<Record<string, number> | null> {
+  try {
+    const cached = JSON.parse(localStorage.getItem(FX_KEY) || "null");
+    if (cached && Date.now() - cached.ts < 12 * 3600000) return Promise.resolve(cached.rates);
+  } catch { /* fetch fresh */ }
+  if (!fxPromise) {
+    fxPromise = fetch("https://open.er-api.com/v6/latest/EUR")
+      .then(r => r.json())
+      .then(d => {
+        if (d?.result !== "success" || !d.rates) return null;
+        try { localStorage.setItem(FX_KEY, JSON.stringify({ ts: Date.now(), rates: d.rates })); } catch { /* not cached */ }
+        return d.rates as Record<string, number>;
+      })
+      .catch(() => null);
+  }
+  return fxPromise;
+}
+function useEurRates(): Record<string, number> | null {
+  const [rates, setRates] = useState<Record<string, number> | null>(null);
+  useEffect(() => { let alive = true; loadEurRates().then(r => { if (alive) setRates(r); }); return () => { alive = false; }; }, []);
+  return rates;
+}
+function toEur(amount: number, currency: string, rates: Record<string, number> | null): number | null {
+  if (currency === "EUR") return amount;
+  const r = rates?.[currency];
+  return r ? amount / r : null;
+}
+function fmtEurApprox(eur: number): string {
+  return `≈ €${eur >= 100 ? Math.round(eur) : eur.toFixed(eur >= 10 ? 0 : 2).replace(".", ",")}`;
+}
+
 function TripModeIcon({ mode, size = 15, color }: { mode: string; size?: number; color?: string }) {
   if (mode === "rental") return <CategoryIcon id="roadtrip" size={size} color={color || "currentColor"} />;
   return <Icon name={mode === "guide" ? "users" : mode === "transport" ? "bus" : "compass"} size={size} color={color} />;
@@ -344,11 +410,18 @@ function phoneDigits(phone: string): string {
   return (phone || "").replace(/[^\d+]/g, "").replace(/^00/, "+");
 }
 function TripChips({ trip }: { trip: any }) {
+  const rates = useEurRates();
   if (!trip) return null;
-  const cost = trip.cost ? `${trip.cost}${trip.costBasis === "pp" ? " per person" : trip.costBasis === "total" ? " in total" : ""}${trip.groupSize ? ` · group of ${trip.groupSize}` : ""}` : "";
+  const amount = trip.costAmount ? parseFloat(String(trip.costAmount).replace(",", ".")) : NaN;
+  const price = !isNaN(amount) && trip.currency ? fmtMoney(amount, trip.currency) : (trip.cost || "");
+  const eur = !isNaN(amount) && trip.currency && trip.currency !== "EUR"
+    ? (toEur(amount, trip.currency, rates) ?? (typeof trip.costEur === "number" ? trip.costEur : null))
+    : null;
+  const basis = trip.costBasis === "pp" ? " per person" : trip.costBasis === "total" ? " in total" : "";
+  const cost = price ? `${price}${eur !== null ? ` (${fmtEurApprox(eur)})` : ""}${basis}${trip.groupSize ? ` · group of ${trip.groupSize}` : ""}` : "";
   return (
     <div className="tip-meta-row">
-      {trip.mode && <span className="trip-chip trip-chip-mode"><TripModeIcon mode={trip.mode} size={13} />{tripModeLabel(trip.mode)}</span>}
+      {tripModes(trip).map(m => <span key={m} className="trip-chip trip-chip-mode"><TripModeIcon mode={m} size={13} />{tripModeLabel(m)}</span>)}
       {cost && <span className="trip-chip"><Icon name="tag" size={13} />{cost}</span>}
       {trip.duration && <span className="trip-chip"><Icon name="clock" size={13} />{trip.duration}</span>}
       {trip.layover && <span className="trip-chip trip-chip-layover"><Icon name="plane" size={13} />{trip.layover === "24" ? "Fits a 24h layover" : "Needs 48h or more"}</span>}
@@ -1834,7 +1907,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     .filter(t => !filterSolo || t.soloFriendly)
     .filter(t => !filterQuickBite || t.quickBite)
     .filter(t => !filterCrew || t.crewFriendly)
-    .filter(t => !filterMode || t.trip?.mode === filterMode)
+    .filter(t => !filterMode || tripModes(t.trip).includes(filterMode))
     .filter(t => !filterGem || t.extras?.hiddenGem)
     .filter(t => !filterClasses || t.extras?.classes === true)
     .filter(t => !filterNight || t.extras?.nightlifeType === filterNight)
@@ -2224,7 +2297,9 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   const [tags, setTags] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
   const [photoError, setPhotoError] = useState(false);
-  const [tripMode, setTripMode] = useState("");
+  const [tripModesSel, setTripModesSel] = useState<string[]>([]);
+  const hasRental = tripModesSel.includes("rental");
+  const eurRates = useEurRates();
   const [trip, setTrip] = useState<Record<string, string>>({});
   const setTripField = (k: string, v: string) => setTrip(t => ({ ...t, [k]: v }));
   const [submitted, setSubmitted] = useState(false);
@@ -2318,7 +2393,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
   }
 
   function handleSubmit() {
-    if (!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && !tripMode)) return;
+    if (!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && tripModesSel.length === 0)) return;
     const newTip: any = {
       id: Date.now(),
       name: name.trim(),
@@ -2345,10 +2420,18 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
     if (category === "nightlife" && nightlifeType) extras.nightlifeType = nightlifeType;
     if (Object.keys(extras).length) newTip.extras = extras;
     if (isRoadTrip) {
-      const keep = ["contactName", "contactPhone", "cost", "costBasis", "groupSize", "included", "duration", "layover", "season", "bring",
-        ...(tripMode === "rental" ? ["rentalCompany", "discountCode", "rentalTips"] : [])];
-      const t: Record<string, string> = { mode: tripMode };
+      const keep = ["contactName", "contactPhone", "costBasis", "groupSize", "included", "duration", "layover", "season", "bring",
+        ...(hasRental ? ["rentalCompany", "discountCode", "rentalTips"] : [])];
+      const t: Record<string, any> = { modes: tripModesSel };
       for (const k of keep) if ((trip[k] || "").trim()) t[k] = trip[k].trim();
+      const amount = parseFloat((trip.costAmount || "").replace(",", "."));
+      if (!isNaN(amount)) {
+        const currency = trip.currency || currencyOptions(dest?.country)[0] || "EUR";
+        t.costAmount = String(amount);
+        t.currency = currency;
+        const eur = toEur(amount, currency, eurRates);
+        if (eur !== null) t.costEur = Math.round(eur * 100) / 100;
+      }
       newTip.trip = t;
     }
     const parsedTags = tags.split(/[\s,#]+/).map((t: string) => t.replace(/^#/, "").trim()).filter(Boolean);
@@ -2532,13 +2615,17 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
                 value={place} onChange={e => setPlace(e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-lbl">How did you get around?</label>
+              <label className="form-lbl">How did you get around? <span className="form-lbl-hint">(pick all that apply)</span></label>
               <div className="price-chip-row">
-                {TRIP_MODES.map(m => (
-                  <button key={m.id} type="button" className={`price-chip${tripMode === m.id ? " active" : ""}`} onClick={() => setTripMode(m.id)}>
-                    <TripModeIcon mode={m.id} size={15} />{m.label}
-                  </button>
-                ))}
+                {TRIP_MODES.map(m => {
+                  const on = tripModesSel.includes(m.id);
+                  return (
+                    <button key={m.id} type="button" aria-pressed={on} className={`price-chip${on ? " active" : ""}`}
+                      onClick={() => setTripModesSel(v => on ? v.filter(x => x !== m.id) : [...v, m.id])}>
+                      <TripModeIcon mode={m.id} size={15} />{m.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </>
@@ -2706,12 +2793,12 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         )}
 
         {isRoadTrip && (() => {
-          const filled = ["contactName", "contactPhone", "cost", "included", "duration", "layover", "season", "bring", "rentalCompany", "discountCode", "rentalTips"].filter(k => (trip[k] || "").trim()).length + (hiddenGem ? 1 : 0);
+          const filled = ["contactName", "contactPhone", "costAmount", "included", "duration", "layover", "season", "bring", "rentalCompany", "discountCode", "rentalTips"].filter(k => (trip[k] || "").trim()).length + (hiddenGem ? 1 : 0);
           return (
             <button type="button" className={`more-options-btn${showMoreOptions ? " open" : ""}`} onClick={() => setShowMoreOptions(v => !v)} aria-expanded={showMoreOptions}>
               <span className="more-options-text">
                 <span className="form-lbl">Extra details</span>
-                <span className="toggle-sub">Hidden gem, guide contact, costs, duration, best season{tripMode === "rental" ? ", rental car" : ""} · optional</span>
+                <span className="toggle-sub">Hidden gem, guide contact, costs, duration, best season{hasRental ? ", rental car" : ""} · optional</span>
               </span>
               {filled > 0 && <span className="more-options-count">{filled} filled</span>}
               <Icon name={showMoreOptions ? "chevronUp" : "chevronDown"} size={18} />
@@ -2739,10 +2826,27 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
             </div>
             <div className="trip-field-group">
               <div className="form-lbl">Cost</div>
-              <div className="trip-row">
-                <input className="form-inp" placeholder="e.g. $200 or 3100 INR" value={trip.cost || ""} onChange={e => setTripField("cost", e.target.value)} />
-                <input className="form-inp trip-group-inp" type="number" min="1" placeholder="Group" aria-label="Group size" value={trip.groupSize || ""} onChange={e => setTripField("groupSize", e.target.value)} />
-              </div>
+              {(() => {
+                const currencies = currencyOptions(dest?.country);
+                const currency = trip.currency || currencies[0] || "EUR";
+                const amount = parseFloat((trip.costAmount || "").replace(",", "."));
+                const eur = !isNaN(amount) && currency !== "EUR" ? toEur(amount, currency, eurRates) : null;
+                return (
+                  <>
+                    <div className="trip-row">
+                      <select className="form-inp trip-currency" aria-label="Currency" value={currency} onChange={e => setTripField("currency", e.target.value)}>
+                        {currencies.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <input className="form-inp" inputMode="decimal" placeholder="Amount, e.g. 200" aria-label="Amount" value={trip.costAmount || ""}
+                        onChange={e => { setTripField("costAmount", e.target.value.replace(/[^\d.,]/g, "")); if (!trip.currency) setTripField("currency", currency); }} />
+                      <input className="form-inp trip-group-inp" type="number" min="1" placeholder="Group" aria-label="Group size" value={trip.groupSize || ""} onChange={e => setTripField("groupSize", e.target.value)} />
+                    </div>
+                    {!isNaN(amount) && currency !== "EUR" && (
+                      <div className="toggle-sub trip-eur-hint">{eur !== null ? `${fmtEurApprox(eur)} at today's rate` : "Euro rate not available right now"}</div>
+                    )}
+                  </>
+                );
+              })()}
               <div className="price-chip-row">
                 {[["pp", "Per person"], ["total", "In total"]].map(([id, lbl]) => (
                   <button key={id} type="button" className={`price-chip${trip.costBasis === id ? " active" : ""}`} onClick={() => setTripField("costBasis", trip.costBasis === id ? "" : id)}>{lbl}</button>
@@ -2767,7 +2871,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
               <div className="form-lbl">What to bring</div>
               <input className="form-inp" placeholder="e.g. hiking boots, water, snacks" value={trip.bring || ""} onChange={e => setTripField("bring", e.target.value)} />
             </div>
-            {tripMode === "rental" && (
+            {hasRental && (
               <div className="trip-field-group">
                 <div className="form-lbl">Rental car</div>
                 <input className="form-inp" placeholder="Rental company, e.g. Hertz.nl (insurance included)" value={trip.rentalCompany || ""} onChange={e => setTripField("rentalCompany", e.target.value)} />
@@ -2847,7 +2951,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, profile, defa
         </div>
 
         <button className="submit-btn" onClick={handleSubmit}
-          disabled={!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && !tripMode)}>
+          disabled={!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && tripModesSel.length === 0)}>
           Post Recommendation
         </button>
       </div>
@@ -3557,7 +3661,7 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
     .filter(r => !isFood || !filterSolo || r.tip.soloFriendly)
     .filter(r => !isFood || !filterQuickBite || r.tip.quickBite)
     .filter(r => !isFood || !filterCrew || r.tip.crewFriendly)
-    .filter(r => !isTrip || !filterMode || r.tip.trip?.mode === filterMode)
+    .filter(r => !isTrip || !filterMode || tripModes(r.tip.trip).includes(filterMode))
     .filter(r => !filterGem || r.tip.extras?.hiddenGem)
     .filter(r => !filterClasses || r.tip.extras?.classes === true)
     .filter(r => !filterNight || r.tip.extras?.nightlifeType === filterNight);
