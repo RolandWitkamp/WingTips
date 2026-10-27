@@ -290,7 +290,9 @@
         .pill-city { font-size:15px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .pill-code { font-size:12px; color:var(--text2); font-weight:600; }
 
-        .top-tip-card { display:block; width:100%; text-align:left; cursor:pointer; background:var(--surface); border:none; border-radius:22px; padding:18px; margin-bottom:24px; font-family:inherit; box-shadow:var(--shadow); }
+        .top-tip-card { display:block; width:100%; text-align:left; cursor:pointer; background:var(--surface); border:none; border-radius:22px; padding:18px; margin-bottom:0; font-family:inherit; box-shadow:var(--shadow); }
+        .latest-list { display:flex; flex-direction:column; gap:12px; }
+        .latest-block { padding-bottom:24px; }
 
         .top-tip-dest { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700; color:var(--navy); margin-bottom:10px; }
         .top-tip-text { font-size:14px; color:var(--text3); line-height:1.55; margin-bottom:12px; }

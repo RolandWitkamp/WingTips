@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.22.0";
+const APP_VERSION = "1.23.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -1569,17 +1569,13 @@ function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests 
     setShowSugg(false);
     onDestClick(code);
   }
-  const latestTip = (() => {
-    let best: { tip: any; destCode: string; destCity: string; destFlag: string } | null = null;
+  const latestTips = (() => {
+    const all: { tip: any; destCode: string; destCity: string }[] = [];
     for (const dest of Object.values(DESTINATIONS) as any[]) {
-      for (const tip of [...(dest.crewTips || []), ...((addedTips[dest.code]) || [])]) {
-        // Full timestamp first: several tips on the same day otherwise tie on the date alone.
-        if (!best || (tip.createdAt || tip.date || "") > (best.tip.createdAt || best.tip.date || "")) {
-          best = { tip, destCode: dest.code, destCity: dest.city, destFlag: dest.flag };
-        }
-      }
+      for (const tip of [...(dest.crewTips || []), ...((addedTips[dest.code]) || [])]) all.push({ tip, destCode: dest.code, destCity: dest.city });
     }
-    return best;
+    // Full timestamp first: several tips on the same day otherwise tie on the date alone.
+    return all.sort((a, b) => (b.tip.createdAt || b.tip.date || "").localeCompare(a.tip.createdAt || a.tip.date || "")).slice(0, 5);
   })();
   return (
     <div className="screen">
@@ -1628,14 +1624,18 @@ function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests 
           </div>
         </div>
       )}
-      {latestTip && (
-        <div className="section-block">
+      {latestTips.length > 0 && (
+        <div className="section-block latest-block">
           <div className="section-label">Latest from the crew</div>
-          <button className="top-tip-card" onClick={() => onTipClick(latestTip.destCode, latestTip.tip.id, latestTip.tip.category)}>
-            <div className="top-tip-dest"><CategoryIcon id={latestTip.tip.category || "other"} color={CATEGORIES.find(c => c.id === latestTip.tip.category)?.color} size={16} />{latestTip.destCity}</div>
-            <TipText text={latestTip.tip.text} className="top-tip-text" />
-            <div className="top-tip-author">{latestTip.tip.name}, {latestTip.tip.role}<span className="top-tip-likes"><Icon name="heart" size={14} />{latestTip.tip.likes || 0}</span></div>
-          </button>
+          <div className="latest-list">
+            {latestTips.map(({ tip, destCode, destCity }) => (
+              <button key={`${destCode}-${tip.id}`} className="top-tip-card" onClick={() => onTipClick(destCode, tip.id, tip.category)}>
+                <div className="top-tip-dest"><CategoryIcon id={tip.category || "other"} color={CATEGORIES.find(c => c.id === tip.category)?.color} size={16} />{destCity}</div>
+                <TipText text={tip.text} className="top-tip-text" />
+                <div className="top-tip-author">{tip.name}, {tip.role}<span className="top-tip-likes"><Icon name="heart" size={14} />{tip.likes || 0}</span></div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -1949,8 +1949,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   // category where it no longer shows as an option.
   useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } if (activeCategory !== "roadtrip") setFilterMode(""); setFilterGem(false); setFilterClasses(false); setFilterNight(""); }, [activeCategory]);
 
+  const isAll = activeCategory === "all";
   const tipsForCat = crewTips
-    .filter(t => t.category === activeCategory)
+    .filter(t => isAll || t.category === activeCategory)
     .filter(t => filterRole === "all" || t.role === filterRole)
     .filter(t => !filterJetlag || t.jetlagProof)
     .filter(t => !filterSolo || t.soloFriendly)
@@ -1966,11 +1967,11 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       : new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime()
     );
 
-  const categoryTipCount = crewTips.filter(t => t.category === activeCategory).length;
+  const categoryTipCount = crewTips.filter(t => isAll || t.category === activeCategory).length;
   const [summaries, setSummaries] = useState<Record<string, { text: string | null; loading: boolean; error: boolean }>>({});
   useEffect(() => {
     const key = `${code}:${activeCategory}`;
-    if (categoryTipCount === 0 || summaries[key]) return;
+    if (isAll || categoryTipCount === 0 || summaries[key]) return;
     setSummaries(prev => ({ ...prev, [key]: { text: null, loading: true, error: false } }));
     supabase.functions.invoke("generate-summary", { body: { destCode: code, category: activeCategory } })
       .then(({ data, error }: any) => {
@@ -2094,12 +2095,12 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
       </div>
       {(() => {
         const activeCat = CATEGORIES.find(c => c.id === activeCategory);
-        const activeCount = crewTips.filter(t => t.category === activeCategory).length;
+        const activeCount = crewTips.filter(t => isAll || t.category === activeCategory).length;
         return (
           <div className="dest-action-row">
             <button className="cat-picker-btn" onClick={() => setShowCatPicker(true)}>
-              {activeCat && <CategoryIcon id={activeCat.id} color="#fff" size={18} />}
-              <span className="cat-picker-label">{activeCat?.label || "Category"}</span>
+              {isAll ? <Icon name="grid" size={18} color="#fff" /> : activeCat && <CategoryIcon id={activeCat.id} color="#fff" size={18} />}
+              <span className="cat-picker-label">{isAll ? "All tips" : activeCat?.label || "Category"}</span>
               {activeCount > 0 && <span className="cat-picker-count">{activeCount}</span>}
               <Icon name="chevronDown" size={16} strokeWidth={2.2} className="cat-picker-chevron" />
             </button>
@@ -2116,10 +2117,11 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           tips={crewTips}
           title={dest.city}
           subtitle="Browse by category"
+          allOption
         />
       )}
       <div className="content-pad">
-        <div className="ai-panel">
+        {!isAll && <div className="ai-panel">
           <div className="ai-panel-label"><Icon name="sparkle" size={16} />AI briefing</div>
           {(() => {
             const sum = summaries[`${code}:${activeCategory}`];
@@ -2128,13 +2130,13 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
             if (sum.error || !sum.text) return <div className="ai-panel-headline" style={{color:"var(--text2)",fontWeight:400}}>Couldn't generate a briefing right now.</div>;
             return <p className="ai-tip-text" style={{margin:0}}>{sum.text}</p>;
           })()}
-        </div>
+        </div>}
         <div className="crew-tips-header">
           <div className="section-label" style={{ margin: 0 }}>
             From the crew
             {tipsForCat.length > 0 && <span className="section-count"> · {tipsForCat.length}</span>}
           </div>
-          <button className="add-btn" onClick={() => onAddTip(code, activeCategory)}><Icon name="plus" size={15} strokeWidth={2.2} />Add tip</button>
+          <button className="add-btn" onClick={() => onAddTip(code, isAll ? null : activeCategory)}><Icon name="plus" size={15} strokeWidth={2.2} />Add tip</button>
         </div>
         <div className="sort-filter-bar">
           <div className="sort-filter-group">
@@ -2187,6 +2189,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                   <div className="crew-card-date">{tip.date}</div>
                 </div>
                 <TipPhotos photos={tip.photos} />
+                {isAll && <div className="tip-cat-line"><CategoryIcon id={tip.category || "other"} color={CATEGORIES.find(c => c.id === tip.category)?.color} size={15} />{CATEGORIES.find(c => c.id === tip.category)?.label || tip.category}</div>}
                 <TipText text={tip.text} className="crew-card-text" />
                 {tip.category === "roadtrip" && <TripDetails trip={tip.trip} />}
                 {tip.tags && tip.tags.length > 0 && (
@@ -2456,7 +2459,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   }
 
   function handleSubmit() {
-    if (!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && tripModesSel.length === 0)) return;
+    if (!place.trim() || !destCode || !name.trim() || (isRoadTrip && tripModesSel.length === 0)) return;
     const newTip: any = {
       id: Date.now(),
       name: name.trim(),
@@ -3006,7 +3009,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
         </div>
 
         <div className="form-group">
-          <label className="form-lbl">{isRoadTrip ? <>Tell crew about the trip <span className="form-lbl-hint">(optional)</span></> : "Your tip about this place"}</label>
+          <label className="form-lbl">{isRoadTrip ? "Tell crew about the trip" : "Your tip about this place"} <span className="form-lbl-hint">(optional)</span></label>
           <textarea className="form-ta" rows={isRoadTrip ? 6 : 3}
             placeholder={isRoadTrip
               ? "What did you do and how did you get there? What was worth it, what would you skip, and what should the next crew know?"
@@ -3024,7 +3027,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
 
         {e0 && submitError && <p className="donation-error">Couldn't save your changes. Check your connection and try again.</p>}
         <button className="submit-btn" onClick={handleSubmit}
-          disabled={!place.trim() || !destCode || (!isRoadTrip && !note.trim()) || !name.trim() || (isRoadTrip && tripModesSel.length === 0)}>
+          disabled={!place.trim() || !destCode || !name.trim() || (isRoadTrip && tripModesSel.length === 0)}>
           {e0 ? (submitting ? "Saving…" : "Save changes") : "Post Recommendation"}
         </button>
       </div>
@@ -3707,9 +3710,9 @@ function DestinationsMenu({ onClose, onSelect, selectedDest }) {
 }
 
 // ─── CATEGORY MENU ─────────────────────────────────────────────────────────────
-function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips, tips, title, subtitle }: {
+function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips, tips, title, subtitle, allOption }: {
   onClose: () => void; activeCategory: string; onSelectCategory: (id: string) => void;
-  addedTips?: Record<string, any[]>; tips?: any[]; title?: string; subtitle?: string;
+  addedTips?: Record<string, any[]>; tips?: any[]; title?: string; subtitle?: string; allOption?: boolean;
 }) {
   return (
     <div className="cat-menu-backdrop" onClick={onClose}>
@@ -3718,6 +3721,14 @@ function CategoryMenu({ onClose, activeCategory, onSelectCategory, addedTips, ti
         <div className="cat-menu-title">{title || "Browse by Category"}</div>
         <div className="cat-menu-dest">{subtitle || "Latest tips across every destination"}</div>
         <div className="cat-menu-list">
+          {allOption && (
+            <button className={`cat-menu-item${activeCategory === "all" ? " active" : ""}`} onClick={() => { onSelectCategory("all"); onClose(); }}>
+              <span className="cat-menu-icon"><Icon name="grid" size={22} color="var(--navy)" /></span>
+              <span className="cat-menu-label">All tips</span>
+              {(tips?.length || 0) > 0 && <span className="cat-menu-badge">{tips!.length} crew tips</span>}
+              {activeCategory === "all" && <span className="cat-menu-tick"><Icon name="check" size={18} strokeWidth={2.2} /></span>}
+            </button>
+          )}
           {CATEGORIES.map(cat => {
             const count = tips
               ? tips.filter((t: any) => t.category === cat.id).length
