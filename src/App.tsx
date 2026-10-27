@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.21.0";
+const APP_VERSION = "1.21.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -834,13 +834,14 @@ function useAdminSignups(userEmail: string | null) {
 // instead of creating a second row, since that's just two people connecting at the same time.
 // Named lists of saved tips for an upcoming trip ("Mexico next week"), stored per user.
 function useTripLists(userId: string | null) {
-  const [lists, setLists] = useState<{ id: any; name: string; tipKeys: string[] }[]>([]);
+  const [lists, setLists] = useState<{ id: any; name: string; tipKeys: string[]; notes?: string }[]>([]);
   const [ready, setReady] = useState(false);
   useEffect(() => {
     if (!userId) return;
-    supabase.from("trip_lists").select("id,name,tip_keys").order("created_at", { ascending: false }).then(({ data, error }) => {
+    // "*" rather than a column list, so lists still load if the notes column hasn't been added yet.
+    supabase.from("trip_lists").select("*").order("created_at", { ascending: false }).then(({ data, error }) => {
       setReady(!error);
-      if (data) setLists(data.map((l: any) => ({ id: l.id, name: l.name, tipKeys: l.tip_keys || [] })));
+      if (data) setLists(data.map((l: any) => ({ id: l.id, name: l.name, tipKeys: l.tip_keys || [], notes: l.notes || "" })));
     });
   }, [userId]);
   async function createList(name: string, tipKeys: string[] = []): Promise<boolean> {
@@ -864,7 +865,13 @@ function useTripLists(userId: string | null) {
     const { error } = await supabase.from("trip_lists").update({ tip_keys: tipKeys }).eq("id", id);
     if (error) setLists(prev => prev.map(l => l.id === id ? list : l));
   }
-  return { lists, ready, createList, deleteList, toggleTip };
+  async function saveNotes(id: any, notes: string): Promise<boolean> {
+    const { data, error } = await supabase.from("trip_lists").update({ notes }).eq("id", id).select("id");
+    if (error || !data?.length) return false;
+    setLists(prev => prev.map(l => l.id === id ? { ...l, notes } : l));
+    return true;
+  }
+  return { lists, ready, createList, deleteList, toggleTip, saveNotes };
 }
 
 function useConnections(userId: string | null) {
@@ -3005,6 +3012,36 @@ function SaveToListSheet({ tipKey, tripLists, onClose }: { tipKey: string; tripL
   );
 }
 
+function TripListNotes({ list, tripLists }: { list: any; tripLists: any }) {
+  const [text, setText] = useState(list.notes || "");
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const timer = useRef<any>(null);
+  const latest = useRef(text);
+  async function save(value: string) {
+    setState("saving");
+    const ok = await tripLists.saveNotes(list.id, value);
+    if (latest.current === value) setState(ok ? "saved" : "failed");
+  }
+  useEffect(() => () => { if (timer.current) { clearTimeout(timer.current); if (latest.current !== (list.notes || "")) tripLists.saveNotes(list.id, latest.current); } }, []);
+  return (
+    <div className="trip-notes">
+      <label className="form-lbl" htmlFor={`trip-notes-${list.id}`}>Notes for this trip</label>
+      <textarea id={`trip-notes-${list.id}`} className="form-ta" rows={4} value={text}
+        placeholder="e.g. Land Monday 14:00, book the balloon trip for Tuesday, bring cash for the market"
+        onChange={e => {
+          const v = e.target.value;
+          setText(v); latest.current = v; setState("idle");
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => { timer.current = null; save(v); }, 800);
+        }}
+        onBlur={() => { if (timer.current) { clearTimeout(timer.current); timer.current = null; save(latest.current); } }} />
+      <div className={`trip-notes-state${state === "failed" ? " is-failed" : ""}`} aria-live="polite">
+        {state === "saving" ? "Saving…" : state === "saved" ? "Saved" : state === "failed" ? "Couldn't save. Check your connection and try again." : "Only you can see these notes."}
+      </div>
+    </div>
+  );
+}
+
 function resolveTipKey(key: string, addedTips: any) {
   const [code, idStr] = key.split("-");
   const dest = (DESTINATIONS as any)[code];
@@ -3076,6 +3113,7 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, add
           </div>
         )}
 
+        {openList && <TripListNotes key={openList.id} list={openList} tripLists={tripLists} />}
         {openList && (
           <div className="trip-list-head">
             <span className="search-results-meta" style={{ margin: 0 }}>{shownTips.length} tip{shownTips.length !== 1 ? "s" : ""} in this list</span>

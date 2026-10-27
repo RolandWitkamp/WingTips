@@ -167,6 +167,9 @@
       .trip-list-count { font-size:12px; font-weight:600; color:var(--text2); }
       .trip-list-create { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
       .trip-list-create-actions { display:flex; gap:8px; align-items:center; }
+      .trip-notes { display:flex; flex-direction:column; gap:8px; background:var(--surface); border-radius:18px; padding:14px; box-shadow:var(--shadow); margin-bottom:16px; }
+      .trip-notes-state { font-size:12px; color:var(--text2); }
+      .trip-notes-state.is-failed { color:#B91C1C; }
       .trip-list-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
       .list-picker { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
       .more-options-btn { display:flex; align-items:center; gap:10px; width:100%; background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:14px 16px; cursor:pointer; text-align:left; font-family:inherit; color:var(--text2); }

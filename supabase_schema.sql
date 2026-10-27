@@ -198,6 +198,7 @@ create table if not exists trip_lists (
 alter table trip_lists enable row level security;
 drop policy if exists "trip_lists_own" on trip_lists;
 create policy "trip_lists_own" on trip_lists for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+alter table trip_lists add column if not exists notes text;
 alter table recommendations add column if not exists visibility text not null default 'public';
 alter table recommendations enable row level security;
 -- visibility='connections' tips are only readable by the author and their accepted connections
