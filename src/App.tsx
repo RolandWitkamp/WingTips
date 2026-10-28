@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.23.1";
+const APP_VERSION = "1.23.2";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -4204,10 +4204,10 @@ function AppContent() {
     const words = trimmed.split(/\s+/);
     const destCodes = words.filter((w: string) => (DESTINATIONS as any)[w.toUpperCase()]);
     const keywords = words.filter((w: string) => !(DESTINATIONS as any)[w.toUpperCase()]);
-    if (destCodes.length === 1 && keywords.length === 0) { setSelectedDest(destCodes[0].toUpperCase()); setScreen("dest"); return; }
+    if (destCodes.length === 1 && keywords.length === 0) { setSelectedDest(destCodes[0].toUpperCase()); setActiveCategory("all"); setScreen("dest"); return; }
     if (destCodes.length === 0 && keywords.length > 0) {
       const cityMatch = (Object.values(DESTINATIONS) as any[]).find(d => d.city.toLowerCase().includes(trimmed.toLowerCase()));
-      if (cityMatch) { setSelectedDest(cityMatch.code); setScreen("dest"); return; }
+      if (cityMatch) { setSelectedDest(cityMatch.code); setActiveCategory("all"); setScreen("dest"); return; }
     }
     setSearchQuery(trimmed);
     setScreen("search");
@@ -4257,14 +4257,14 @@ function AppContent() {
           the top and bottom nav, the same way DestScreen's own .map-overlay is bounded
           by .screen -- instead of position:fixed with a guessed/measured viewport offset. */}
       <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
+        {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
         {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} isAdmin={adminSignups.isAdmin} tripLists={tripLists} />}
         {screen === "edittip" && editingTip && <AddRecommendationScreen key={`edit-${editingTip.id}`} editTip={editingTip} onBack={() => { const t = editingTip; setEditingTip(null); setSelectedDest(t.destCode); setActiveCategory(t.category); setScreen("dest"); }} selectedDest={editingTip.destCode} onSubmit={handleRecommendationSubmitted} onUpdate={handleRecommendationUpdated} profile={profile} defaultCategory={editingTip.category} />}
         {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
-        {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
-        {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
+        {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
+        {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
-        {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setScreen("dest"); }} addedTips={addedTips} tripLists={tripLists} />}
+        {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} addedTips={addedTips} tripLists={tripLists} />}
         {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
         {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} addedTips={addedTips} />}
 
@@ -4272,7 +4272,7 @@ function AppContent() {
         {showDestMenu && (
           <DestinationsMenu
             onClose={() => setShowDestMenu(false)}
-            onSelect={code => { setSelectedDest(code); setScreen("dest"); }}
+            onSelect={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }}
             selectedDest={selectedDest}
           />
         )}
