@@ -150,6 +150,12 @@
       .tip-gem-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#FBEAFD; color:#A21CAF; }
       .tip-extra-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#EEF1F5; color:var(--text3); }
       .trip-lists { margin-bottom:4px; }
+      .tip-rating-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:700; background:#FEF6E0; color:#8A5A00; }
+      .tip-rating-badge svg { fill:currentColor; }
+      .tip-rating-count { font-weight:500; color:#8A6A2A; }
+      .comment-as { font-size:13px; color:var(--text2); }
+      .comment-as strong { color:var(--text); }
+      .notif-trip-line { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--text2); margin-bottom:2px; }
       .save-list-modal { text-align:left; }
       .save-list-modal .donation-title { text-align:left; }
       .save-list-head { display:flex; align-items:center; gap:12px; margin-bottom:16px; }

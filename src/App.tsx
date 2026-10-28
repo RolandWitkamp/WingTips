@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.23.2";
+const APP_VERSION = "1.24.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -515,6 +515,39 @@ function TipPhotos({ photos }: { photos?: string[] }) {
   );
 }
 
+// Google doesn't allow storing ratings, so only the place id is saved with a tip and the score is
+// fetched live (once per place per session).
+const ratingCache = new Map<string, Promise<{ rating: number; total: number } | null>>();
+function fetchGoogleRating(placeId: string) {
+  if (!ratingCache.has(placeId)) {
+    ratingCache.set(placeId, (async () => {
+      if (!(await loadGoogleMaps()) || !ensurePlacesServices()) return null;
+      return new Promise<{ rating: number; total: number } | null>(resolve => {
+        try {
+          placesService.getDetails({ placeId, fields: ["rating", "user_ratings_total"] }, (p: any, status: string) => {
+            resolve(status === "OK" && p?.rating ? { rating: p.rating, total: p.user_ratings_total || 0 } : null);
+          });
+        } catch { resolve(null); }
+      });
+    })());
+  }
+  return ratingCache.get(placeId)!;
+}
+function GoogleRating({ placeId }: { placeId: string }) {
+  const [r, setR] = useState<{ rating: number; total: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchGoogleRating(placeId).then(x => { if (alive) setR(x); });
+    return () => { alive = false; };
+  }, [placeId]);
+  if (!r) return null;
+  return (
+    <span className="tip-rating-badge" title="Rating on Google Maps">
+      <Icon name="star" size={13} />{r.rating.toFixed(1)}<span className="tip-rating-count">({r.total.toLocaleString("en-GB")}) on Google</span>
+    </span>
+  );
+}
+
 function TipText({ text, className }: { text: string; className: string }) {
   const { title, body } = splitTipText(text);
   return (
@@ -874,6 +907,38 @@ function useTripLists(userId: string | null) {
   return { lists, ready, createList, deleteList, toggleTip, saveNotes };
 }
 
+// In-app notifications for new tips (by other crew) at destinations that appear in your trip
+// lists. The first time this runs on a device it starts from "now", so nobody gets flooded.
+const TRIP_NOTIF_KEY = "wt_trip_notif_seen";
+function useTripTipNotifications(addedTips: Record<string, any[]>, lists: { name: string; tipKeys: string[] }[], userId: string | null) {
+  const [seenTs, setSeenTs] = useState<string>(() => {
+    const now = new Date().toISOString();
+    try {
+      const v = localStorage.getItem(TRIP_NOTIF_KEY);
+      if (v) return v;
+      localStorage.setItem(TRIP_NOTIF_KEY, now);
+    } catch { /* not persisted */ }
+    return now;
+  });
+  const watched = Array.from(new Set(lists.flatMap(l => l.tipKeys.map(k => k.split("-")[0]))));
+  const items: { tip: any; destCode: string; listNames: string[] }[] = [];
+  for (const code of watched) {
+    for (const t of (addedTips[code] || [])) {
+      if (!t.authorId || t.authorId === userId || !t.createdAt) continue;
+      items.push({ tip: t, destCode: code, listNames: lists.filter(l => l.tipKeys.some(k => k.startsWith(code + "-"))).map(l => l.name) });
+    }
+  }
+  items.sort((a, b) => b.tip.createdAt.localeCompare(a.tip.createdAt));
+  const recent = items.slice(0, 20);
+  const unseen = recent.filter(i => i.tip.createdAt > seenTs).length;
+  function markSeen() {
+    const now = new Date().toISOString();
+    try { localStorage.setItem(TRIP_NOTIF_KEY, now); } catch { /* not persisted */ }
+    setSeenTs(now);
+  }
+  return { items: recent, seenTs, unseen, markSeen };
+}
+
 function useConnections(userId: string | null) {
   const [loaded, setLoaded] = useState(false);
   const [accepted, setAccepted] = useState<{ userId: string; name: string; role: string }[]>([]);
@@ -952,6 +1017,26 @@ function useConnections(userId: string | null) {
 // one else ever saw a tip someone added -- the whole point of a crew-shared guide. Now backed by
 // the `recommendations`/`recommendation_comments`/`recommendation_likes` tables: every signed-in
 // crew member reads the same data, and a like/comment is a real row instead of local-only state.
+// Photos live in the public "tip-photos" storage bucket instead of as base64 text in the tip row,
+// so loading every tip at startup doesn't also download every photo. Upload failures keep the
+// photo inline so posting never fails because of storage.
+const PHOTO_BUCKET = "tip-photos";
+async function uploadTipPhotos(photos: string[] | undefined, userId: string): Promise<string[] | undefined> {
+  if (!photos?.length) return photos;
+  const out: string[] = [];
+  for (const [i, src] of photos.entries()) {
+    if (!src.startsWith("data:")) { out.push(src); continue; }
+    try {
+      const blob = await (await fetch(src)).blob();
+      const path = `${userId}/${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: false });
+      if (error) { out.push(src); continue; }
+      out.push(supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl);
+    } catch { out.push(src); }
+  }
+  return out;
+}
+
 function useRecommendations() {
   const [recs, setRecs] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -1003,6 +1088,20 @@ function useRecommendations() {
     }));
     setRecs(mapped);
     setLoaded(true);
+    if (uid) moveInlinePhotos(mapped.filter((r: any) => r.authorId === uid && r.photos?.some((p: string) => p.startsWith("data:"))), uid);
+  }
+
+  const movingPhotos = useRef(false);
+  async function moveInlinePhotos(tips: any[], uid: string) {
+    if (movingPhotos.current || tips.length === 0) return;
+    movingPhotos.current = true;
+    for (const t of tips) {
+      const photos = await uploadTipPhotos(t.photos, uid);
+      if (!photos || photos.some(p => p.startsWith("data:"))) break; // storage not ready yet: try again next session
+      const { data } = await supabase.from("recommendations").update({ photos }).eq("id", t.id).select("id");
+      if (!data?.length) break;
+      setRecs(prev => prev.map(r => r.id === t.id ? { ...r, photos } : r));
+    }
   }
 
   useEffect(() => { reload(); }, []);
@@ -1016,6 +1115,7 @@ function useRecommendations() {
   async function addRecommendation(destCode: string, tipData: any, profile: any) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
+    tipData = { ...tipData, photos: await uploadTipPhotos(tipData.photos, user.id) };
     const row = {
       destination_code: destCode,
       category: tipData.category,
@@ -1059,6 +1159,8 @@ function useRecommendations() {
   // Edits send every field (including cleared ones), unlike inserts. Asks the row back so an
   // update refused by row-level security shows as failed rather than silently doing nothing.
   async function updateRecommendation(tipId: any, destCode: string, tipData: any) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) tipData = { ...tipData, photos: await uploadTipPhotos(tipData.photos, user.id) };
     const row = {
       destination_code: destCode,
       category: tipData.category,
@@ -1810,7 +1912,7 @@ function ConnectButton({ authorId, connections, className }: any) {
   return <button className={className} onClick={(e: any) => { e.stopPropagation(); connections.sendRequest(authorId); }}><Icon name="plus" size={14} strokeWidth={2.2} />Connect</button>;
 }
 
-function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment, onDeleteTip, onEditTip, isAdmin, tripLists }) {
+function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory, connections, favorites, onToggleFavorite, extraTips, focusTipId, onFocusConsumed, onCrewClick, onToggleLike, onAddComment, onDeleteTip, onEditTip, isAdmin, tripLists, me }) {
   const [listSheetKey, setListSheetKey] = useState<string | null>(null);
   const dest = DESTINATIONS[code];
   const liveWeather = useWeather(code, dest.city, dest.country);
@@ -1988,19 +2090,20 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
 
   function handleAddComment(tipId) {
     const form = commentForms[tipId];
-    if (!form?.name?.trim() || !form?.text?.trim()) return;
+    const myName = (me?.name || "").trim();
+    if (!myName || !form?.text?.trim()) return;
     const newComment = {
       id: Date.now(),
-      name: form.name.trim(),
-      role: form.role || "Cabin Crew",
+      name: myName,
+      role: me?.role || "Cabin Crew",
       text: form.text.trim(),
       date: new Date().toISOString().split("T")[0],
     };
     setCrewTips(tips => tips.map(t =>
       t.id === tipId ? { ...t, comments: [...t.comments, newComment] } : t
     ));
-    setCommentForms(f => ({ ...f, [tipId]: { name: "", role: "Cabin Crew", text: "" } }));
-    onAddComment?.(tipId, { name: form.name.trim(), role: form.role || "Cabin Crew", text: form.text.trim() });
+    setCommentForms(f => ({ ...f, [tipId]: { text: "" } }));
+    onAddComment?.(tipId, { name: myName, role: me?.role || "Cabin Crew", text: form.text.trim() });
   }
 
   function updateCommentForm(tipId, field, value) {
@@ -2179,7 +2282,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           ? <div className="no-tips">No crew tips yet here. Be the first!</div>
           : tipsForCat.map(tip => {
             const isExpanded = expandedTip === tip.id;
-            const form = commentForms[tip.id] || { name: "", role: "Cabin Crew", text: "" };
+            const form = commentForms[tip.id] || { text: "" };
             return (
               <div key={tip.id} ref={(el: any) => { tipRefs.current[tip.id] = el; }} className={`crew-card${String(tip.id) === String(focusTipId) ? " crew-card-focused" : ""}`}>
                 <div className="crew-card-top">
@@ -2206,6 +2309,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                     {tip.category === "food" && tip.soloFriendly && <span className="tip-solo-badge"><Icon name="user" size={13} />Solo friendly</span>}
                     {tip.category === "food" && tip.quickBite && <span className="tip-quickbite-badge"><Icon name="bolt" size={13} />Quick bite</span>}
                     {tip.category === "food" && tip.crewFriendly && <span className="tip-crew-badge"><Icon name="plane" size={13} />Crew friendly</span>}
+                    {tip.extras?.placeId && <GoogleRating placeId={tip.extras.placeId} />}
                     <ExtrasBadges tip={tip} />
                     {tip.visibility === "connections" && <span className="tip-private-badge"><Icon name="lock" size={13} />Connections only</span>}
                     {tip.coords && hotelCoords && (
@@ -2264,18 +2368,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                       </div>
                     )}
                     <div className="comment-form">
-                      <input className="comment-inp" placeholder="Your name"
-                        value={form.name}
-                        onChange={e => updateCommentForm(tip.id, "name", e.target.value)} />
-                      <select className="comment-sel"
-                        value={form.role}
-                        onChange={e => updateCommentForm(tip.id, "role", e.target.value)}>
-                        <option>Cabin Crew</option>
-                        <option>Senior Purser</option>
-                        <option>First Officer</option>
-                        <option>Captain</option>
-                        <option>Ground Staff</option>
-                      </select>
+                      {me?.name
+                        ? <div className="comment-as">Commenting as <strong>{me.name}</strong> · {me.role}</div>
+                        : <div className="comment-as">Add your name in your profile to comment.</div>}
                       <div className="comment-input-row">
                         <input className="comment-inp comment-text-inp" placeholder="Add a comment…"
                           value={form.text}
@@ -2283,7 +2378,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                           onKeyDown={e => e.key === "Enter" && handleAddComment(tip.id)} />
                         <button className="comment-submit-btn"
                           onClick={() => handleAddComment(tip.id)}
-                          disabled={!form.name?.trim() || !form.text?.trim()}>
+                          disabled={!me?.name || !form.text?.trim()} aria-label="Post comment">
                           <Icon name="arrowUp" size={18} strokeWidth={2.2} />
                         </button>
                       </div>
@@ -2355,6 +2450,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   const [hiddenGem, setHiddenGem] = useState(!!e0?.extras?.hiddenGem);
   const [classes, setClasses] = useState<"" | "yes" | "no">(e0?.extras?.classes === true ? "yes" : e0?.extras?.classes === false ? "no" : "");
   const [nightlifeType, setNightlifeType] = useState<string>(e0?.extras?.nightlifeType || "");
+  const [googlePlaceId, setGooglePlaceId] = useState<string>(e0?.extras?.placeId || "");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [visibility, setVisibility] = useState<"public" | "connections">(e0?.visibility === "connections" ? "connections" : "public");
   const [tags, setTags] = useState((e0?.tags || []).join(" "));
@@ -2439,6 +2535,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     setShowDropdown(false);
     if (suggSource === "google") {
       const place_ = await googlePlaceDetails(s.place_id);
+      setGooglePlaceId(s.place_id || "");
       const shortName = place_?.name || s.structured_formatting?.main_text || s.description || "";
       setPlace(shortName);
       if (place_?.geometry?.location) setPlaceCoords({ lat: String(place_.geometry.location.lat()), lon: String(place_.geometry.location.lng()) });
@@ -2447,6 +2544,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
       return;
     }
     const shortName = s.namedetails?.name || s.name || s.display_name.split(",")[0];
+    setGooglePlaceId("");
     setPlace(shortName);
     setPlaceCoords({ lat: s.lat, lon: s.lon });
     setCategory(osmCategoryGuess(s.class, s.type));
@@ -2456,6 +2554,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
 
   function handlePlaceChange(e: any) {
     setPlace(e.target.value);
+    setGooglePlaceId("");
     setPlaceCoords(null);
     setJetlagProof(false);
   }
@@ -2486,6 +2585,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     if (hiddenGem) extras.hiddenGem = true;
     if (category === "fitness" && classes) extras.classes = classes === "yes";
     if (category === "nightlife" && nightlifeType) extras.nightlifeType = nightlifeType;
+    if (!isRoadTrip && googlePlaceId) extras.placeId = googlePlaceId;
     if (Object.keys(extras).length) newTip.extras = extras;
     if (isRoadTrip) {
       const keep = ["contactName", "contactPhone", "costBasis", "groupSize", "included", "duration", "layover", "season", "bring",
@@ -3253,13 +3353,15 @@ function FavoritesScreen({ onBack, favorites, onToggleFavorite, onDestClick, add
 }
 
 // ─── NOTIFICATIONS ─────────────────────────────────────────────────────────────
-function NotificationsScreen({ onBack, notes, onMarkAllRead, adminSignups, onNotificationClick }) {
+function NotificationsScreen({ onBack, notes, onMarkAllRead, adminSignups, onNotificationClick, tripNotifs, onTipClick }: any) {
   const showAdminBlock = adminSignups?.isAdmin && adminSignups.events.length > 0;
+  const [tripSeenAtOpen] = useState<string>(tripNotifs?.seenTs || "");
+  const tripItems: any[] = tripNotifs?.items || [];
   // Opening this screen IS reading it -- no separate "Mark all read" action needed. Fires once on
   // mount; the still-unread styling below still shows on this first render (state hasn't updated
   // yet), then clears once the mark lands, so a freshly-opened notification is still visible as
   // new for a moment instead of disappearing before it's even seen.
-  useEffect(() => { onMarkAllRead(); adminSignups?.markSeen?.(); }, []);
+  useEffect(() => { onMarkAllRead(); adminSignups?.markSeen?.(); tripNotifs?.markSeen?.(); }, []);
   return (
     <div className="screen">
       <div className="screen-topbar">
@@ -3269,7 +3371,7 @@ function NotificationsScreen({ onBack, notes, onMarkAllRead, adminSignups, onNot
       <div className="content-pad">
         {showAdminBlock && (
           <div className="conn-requests-block">
-            <div className="conn-requests-label">🆕 New sign-ups</div>
+            <div className="conn-requests-label">New sign-ups</div>
             {adminSignups.events.map((e: any) => (
               <div key={e.id} className={`my-tip-card${e.id > adminSignups.lastSeenId ? " signup-unread" : ""}`}>
                 <div className="my-tip-meta">{new Date(e.created_at).toLocaleString()}</div>
@@ -3278,8 +3380,28 @@ function NotificationsScreen({ onBack, notes, onMarkAllRead, adminSignups, onNot
             ))}
           </div>
         )}
-        {notes.length === 0 && !showAdminBlock
-          ? <div className="no-tips">No notifications yet.</div>
+        {tripItems.length > 0 && (
+          <div className="conn-requests-block">
+            <div className="conn-requests-label">New tips for your trips</div>
+            {tripItems.map(({ tip, destCode, listNames }: any) => {
+              const cat = CATEGORIES.find(c => c.id === tip.category);
+              const isNew = tip.createdAt > tripSeenAtOpen;
+              const { title, body } = splitTipText(tip.text);
+              return (
+                <button key={`${destCode}-${tip.id}`} type="button" className={`notif-item${isNew ? " unread" : ""}`} onClick={() => onTipClick(destCode, tip.id, tip.category)}>
+                  <div className="notif-dot" style={{ opacity: isNew ? 1 : 0 }} />
+                  <div className="notif-text">
+                    <span className="notif-trip-line"><CategoryIcon id={tip.category || "other"} color={cat?.color} size={14} />{(DESTINATIONS as any)[destCode]?.city || destCode} · {listNames.join(", ")}</span>
+                    <strong>{title || body}</strong> by {tip.name}
+                  </div>
+                  <div className="notif-time">{tip.date}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {notes.length === 0 && !showAdminBlock && tripItems.length === 0
+          ? <div className="no-tips">No notifications yet. Add tips to a trip list under Saved, and new tips for those destinations show up here.</div>
           : notes.map(n => (
             <button key={n.id} className={`notif-item${n.read ? "" : " unread"}`} onClick={() => n.destCode && onNotificationClick(n)} disabled={!n.destCode}>
               <div className="notif-dot" style={{ opacity: n.read ? 0 : 1 }} />
@@ -4119,6 +4241,8 @@ export default function WingTipsApp() {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthUser(session?.user ?? null);
       if (event === "PASSWORD_RECOVERY") setShowResetPassword(true);
+      // The offline copy holds this account's tips and lists; don't leave it behind on logout.
+      if (event === "SIGNED_OUT" && "caches" in window) caches.delete("wingtips-v1").catch(() => {});
     });
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -4150,11 +4274,12 @@ function AppContent() {
     reload: reloadProfile,
   } = useCloudProfile();
   const adminSignups = useAdminSignups(userEmail);
-  const unreadCount = notifications.filter(n => !n.read).length + adminSignups.unseenCount;
   const connections = useConnections(userId);
   const tripLists = useTripLists(userId);
   const { byDest: addedTips, loaded: recsLoaded, addRecommendation, updateRecommendation, toggleLike, addComment, deleteRecommendation, reload: reloadRecs } = useRecommendations();
   const [editingTip, setEditingTip] = useState<any>(null);
+  const tripNotifs = useTripTipNotifications(addedTips, tripLists.lists, userId);
+  const unreadCount = notifications.filter(n => !n.read).length + adminSignups.unseenCount + tripNotifs.unseen;
 
   useEffect(() => {
     if (!profileLoaded || !recsLoaded || !userId) return;
@@ -4258,12 +4383,12 @@ function AppContent() {
           by .screen -- instead of position:fixed with a guessed/measured viewport offset. */}
       <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
-        {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} isAdmin={adminSignups.isAdmin} tripLists={tripLists} />}
+        {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} isAdmin={adminSignups.isAdmin} tripLists={tripLists} me={profile} />}
         {screen === "edittip" && editingTip && <AddRecommendationScreen key={`edit-${editingTip.id}`} editTip={editingTip} onBack={() => { const t = editingTip; setEditingTip(null); setSelectedDest(t.destCode); setActiveCategory(t.category); setScreen("dest"); }} selectedDest={editingTip.destCode} onSubmit={handleRecommendationSubmitted} onUpdate={handleRecommendationUpdated} profile={profile} defaultCategory={editingTip.category} />}
         {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
         {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
-        {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
+        {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} tripNotifs={tripNotifs} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
         {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} addedTips={addedTips} tripLists={tripLists} />}
         {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
         {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} addedTips={addedTips} />}
