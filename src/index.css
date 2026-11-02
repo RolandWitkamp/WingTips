@@ -150,6 +150,10 @@
       .tip-gem-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#FBEAFD; color:#A21CAF; }
       .tip-extra-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#EEF1F5; color:var(--text3); }
       .trip-lists { margin-bottom:4px; }
+      .profile-nudge { display:flex; align-items:center; gap:12px; width:100%; background:var(--surface); border:none; border-radius:18px; padding:14px 16px; box-shadow:var(--shadow); cursor:pointer; text-align:left; font-family:inherit; color:var(--navy); }
+      .profile-nudge-icon { width:40px; height:40px; border-radius:14px; background:var(--surface2); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+      .profile-nudge-text { flex:1; display:flex; flex-direction:column; gap:2px; font-size:13px; color:var(--text2); }
+      .profile-nudge-text strong { font-size:15px; color:var(--text); }
       .tip-rating-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:700; background:#FEF6E0; color:#8A5A00; }
       .tip-rating-badge svg { fill:currentColor; }
       .tip-rating-count { font-weight:500; color:#8A6A2A; }

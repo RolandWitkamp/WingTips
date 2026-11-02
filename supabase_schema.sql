@@ -316,3 +316,31 @@ drop policy if exists "tip_photos_insert_own" on storage.objects;
 create policy "tip_photos_insert_own" on storage.objects for insert to authenticated with check (bucket_id = 'tip-photos' and (storage.foldername(name))[1] = auth.uid()::text);
 drop policy if exists "tip_photos_delete_own" on storage.objects;
 create policy "tip_photos_delete_own" on storage.objects for delete to authenticated using (bucket_id = 'tip-photos' and owner = auth.uid());
+
+
+-- Crew search by name or by the part of the e-mail address before the @ (addresses usually hold
+-- the person's name). Returns id, name and role only -- never the e-mail address. People without
+-- a profile name get one derived from their address ("roland.witkamp" -> "Roland Witkamp").
+create or replace function public.search_crew(q text)
+returns table (id uuid, name text, role text)
+language sql security definer set search_path = public
+as $$
+  select u.id,
+         coalesce(nullif(trim(p.name), ''), initcap(replace(replace(split_part(u.email, '@', 1), '.', ' '), '_', ' '))) as name,
+         coalesce(nullif(p.role, ''), 'Cabin Crew') as role
+  from auth.users u
+  left join public.profiles p on p.id = u.id
+  where auth.uid() is not null
+    and u.id <> auth.uid()
+    and u.email_confirmed_at is not null
+    and length(trim(q)) >= 2
+    and (
+      p.name ilike '%' || trim(q) || '%'
+      or split_part(u.email, '@', 1) ilike '%' || replace(trim(q), ' ', '%') || '%'
+      or lower(u.email) = lower(trim(q))
+    )
+  order by 2
+  limit 20;
+$$;
+revoke all on function public.search_crew(text) from public, anon;
+grant execute on function public.search_crew(text) to authenticated;

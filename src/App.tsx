@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.24.1";
+const APP_VERSION = "1.25.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -1004,6 +1004,10 @@ function useConnections(userId: string | null) {
   async function searchUsers(query: string): Promise<{ userId: string; name: string; role: string }[]> {
     const q = query.trim();
     if (!q || !userId) return [];
+    // search_crew (security definer) also matches the part of the e-mail address before the @,
+    // and finds people who haven't filled in a name yet; it never returns the address itself.
+    const rpc = await supabase.rpc("search_crew", { q });
+    if (!rpc.error) return (rpc.data || []).map((p: any) => ({ userId: p.id, name: p.name || "Crew member", role: p.role || "Cabin Crew" }));
     const { data, error } = await supabase.from("profiles").select("id,name,role")
       .ilike("name", `%${q}%`).neq("id", userId).limit(20);
     if (error) { console.error("searchUsers failed:", error); return []; }
@@ -1656,7 +1660,7 @@ function hotelMarkerIconUrl(): string {
 const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boolean; destCode: string; category?: string; tipId?: number }> = [];
 
 // ─── HOME ──────────────────────────────────────────────────────────────────────
-function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests }) {
+function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests, needsName, onSetupProfile }: any) {
   const [query, setQuery] = useState("");
   const [showSugg, setShowSugg] = useState(false);
   const q = query.trim().toLowerCase();
@@ -1710,6 +1714,15 @@ function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests 
           )}
         </div>
       </div>
+      {needsName && (
+        <div className="section-block">
+          <button type="button" className="profile-nudge" onClick={onSetupProfile}>
+            <span className="profile-nudge-icon"><Icon name="user" size={20} /></span>
+            <span className="profile-nudge-text"><strong>Add your name and role</strong>So colleagues can find you and connect.</span>
+            <Icon name="chevronRight" size={18} />
+          </button>
+        </div>
+      )}
       <DonationReminderCard />
       {recentDests.length > 0 && (
         <div className="section-block">
@@ -3484,8 +3497,8 @@ function AccountSection() {
 }
 
 // ─── PROFILE ───────────────────────────────────────────────────────────────────
-function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile, onCrewClick, onDeleteTip, onEditTip }) {
-  const [tab, setTab] = useState("tips");
+function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile, onCrewClick, onDeleteTip, onEditTip, initialTab }) {
+  const [tab, setTab] = useState(initialTab || "tips");
   const [editing, setEditing] = useState(!profile.name);
   const [connSearch, setConnSearch] = useState("");
   const [userSearchResults, setUserSearchResults] = useState<{ userId: string; name: string; role: string }[] | null>(null);
@@ -3629,7 +3642,8 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
                 )}
                 <input
                   className="conn-search-input"
-                  placeholder="Search all crew members..."
+                  autoFocus={initialTab === "connections"}
+                  placeholder="Search crew by name or e-mail..."
                   value={connSearch}
                   onChange={(e: any) => setConnSearch(e.target.value)}
                 />
@@ -4281,6 +4295,7 @@ function AppContent() {
   const tripLists = useTripLists(userId);
   const { byDest: addedTips, loaded: recsLoaded, addRecommendation, updateRecommendation, toggleLike, addComment, deleteRecommendation, reload: reloadRecs } = useRecommendations();
   const [editingTip, setEditingTip] = useState<any>(null);
+  const [profileTab, setProfileTab] = useState("tips");
   const tripNotifs = useTripTipNotifications(addedTips, tripLists.lists, userId);
   const unreadCount = notifications.filter(n => !n.read).length + adminSignups.unseenCount + tripNotifs.unseen;
 
@@ -4371,7 +4386,10 @@ function AppContent() {
             <Icon name="bell" size={20} />
             {unreadCount > 0 && <div className="notif-badge">{unreadCount}</div>}
           </button>
-          <button className="nav-icon-btn" aria-label="Profile" onClick={() => { setScreen("profile"); setShowCatMenu(false); setShowDestMenu(false); }}>
+          <button className="nav-icon-btn" aria-label="Find crew" title="Find crew" onClick={() => { setProfileTab("connections"); setScreen("profile"); setShowCatMenu(false); setShowDestMenu(false); }}>
+            <Icon name="users" size={20} />
+          </button>
+          <button className="nav-icon-btn" aria-label="Profile" onClick={() => { setProfileTab("tips"); setScreen("profile"); setShowCatMenu(false); setShowDestMenu(false); }}>
             <div className="nav-avatar">{profile.name ? profile.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase() : "?"}</div>
           </button>
           <button className="nav-icon-btn" aria-label="Log out" onClick={() => { if (confirm("Log out?")) supabase.auth.signOut(); }}>
@@ -4385,7 +4403,7 @@ function AppContent() {
           the top and bottom nav, the same way DestScreen's own .map-overlay is bounded
           by .screen -- instead of position:fixed with a guessed/measured viewport offset. */}
       <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
+        {screen === "home"          && <HomeScreen needsName={!profile.name?.trim()} onSetupProfile={() => { setProfileTab("tips"); setScreen("profile"); }} onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
         {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} isAdmin={adminSignups.isAdmin} tripLists={tripLists} me={profile} />}
         {screen === "edittip" && editingTip && <AddRecommendationScreen key={`edit-${editingTip.id}`} editTip={editingTip} onBack={() => { const t = editingTip; setEditingTip(null); setSelectedDest(t.destCode); setActiveCategory(t.category); setScreen("dest"); }} selectedDest={editingTip.destCode} onSubmit={handleRecommendationSubmitted} onUpdate={handleRecommendationUpdated} profile={profile} defaultCategory={editingTip.category} />}
         {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
@@ -4393,7 +4411,7 @@ function AppContent() {
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} tripNotifs={tripNotifs} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
         {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} addedTips={addedTips} tripLists={tripLists} />}
-        {screen === "profile"       && <ProfileScreen onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
+        {screen === "profile"       && <ProfileScreen key={profileTab} initialTab={profileTab} onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
         {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} addedTips={addedTips} />}
 
         {/* DESTINATIONS SLIDE-UP MENU */}
