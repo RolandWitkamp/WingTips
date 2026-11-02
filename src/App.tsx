@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.24.0";
+const APP_VERSION = "1.24.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -4094,12 +4094,15 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
 
   async function handleSignUp() {
     setError("");
-    if (!email.toLowerCase().endsWith("@klm.com")) { setError("Only @klm.com email addresses are allowed."); return; }
+    // The @klm.com rule (plus the owner's exceptions list) is enforced by the database trigger;
+    // checking it here too blocked approved non-KLM test accounts before they reached it.
     if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
     if (password !== confirm) { setError("Passwords do not match."); return; }
     setLoading(true);
     const { error: err } = await supabase.auth.signUp({ email, password });
-    if (err) setError(err.message);
+    if (err) setError(/database error saving new user/i.test(err.message)
+      ? "Only @klm.com addresses can create an account. Already invited? Use Sign in, then Forgot password."
+      : err.message);
     else setVerifyScreen(true);
     setLoading(false);
   }
