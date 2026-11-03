@@ -85,7 +85,7 @@
       .toggle-thumb { position:absolute; top:3px; left:3px; width:20px; height:20px; background:#fff; border-radius:50%; transition:transform 0.2s; display:block; }
       .toggle-switch input:checked ~ .toggle-track .toggle-thumb { transform:translateX(18px); }
       .discount-field-row { display:flex; align-items:center; gap:10px; margin-top:10px; }
-      .discount-inp { width:80px !important; text-align:center; }
+      .discount-inp { width:120px !important; flex-shrink:0; text-align:center; }
       .discount-pct-label { font-size:18px; font-weight:700; color:var(--text); font-family:inherit; }
       .discount-hint { font-size:12px; color:var(--text2); }
       .price-chip, .rec-cat-chip { display:inline-flex; align-items:center; gap:6px; background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:8px 14px; color:var(--text); font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; transition:all 0.15s; }
@@ -150,10 +150,8 @@
       .tip-gem-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#FBEAFD; color:#A21CAF; }
       .tip-extra-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:600; background:#EEF1F5; color:var(--text3); }
       .trip-lists { margin-bottom:4px; }
-      .profile-nudge { display:flex; align-items:center; gap:12px; width:100%; background:var(--surface); border:none; border-radius:18px; padding:14px 16px; box-shadow:var(--shadow); cursor:pointer; text-align:left; font-family:inherit; color:var(--navy); }
-      .profile-nudge-icon { width:40px; height:40px; border-radius:14px; background:var(--surface2); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-      .profile-nudge-text { flex:1; display:flex; flex-direction:column; gap:2px; font-size:13px; color:var(--text2); }
-      .profile-nudge-text strong { font-size:15px; color:var(--text); }
+      .setup-screen .auth-form { gap:8px; }
+      .setup-screen .pef-label { margin:6px 0 0; }
       .tip-rating-badge { display:inline-flex; align-items:center; gap:5px; border-radius:12px; padding:4px 10px; font-size:12px; font-weight:700; background:#FEF6E0; color:#8A5A00; }
       .tip-rating-badge svg { fill:currentColor; }
       .tip-rating-count { font-weight:500; color:#8A6A2A; }

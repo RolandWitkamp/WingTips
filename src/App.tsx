@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.25.0";
+const APP_VERSION = "1.25.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -752,6 +752,9 @@ function useCloudProfile() {
   const [recentDests, setRecentDests] = useState<string[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favoritesSeen, setFavoritesSeen] = useState<string[]>([]);
+  // True only once the profile row was actually read, so a failed load (e.g. no connection) never
+  // looks like "this person has no name yet".
+  const [profileKnown, setProfileKnown] = useState(false);
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -775,6 +778,7 @@ function useCloudProfile() {
       }
     }
     if (row) {
+      setProfileKnown(true);
       setProfile({ name: row.name || "", role: row.role || "Cabin Crew", base: row.base || "AMS", bio: row.bio || "" });
       setRecentDests(row.recent_destinations || []);
       setFavoritesSeen(row.favorites_seen || []);
@@ -821,7 +825,7 @@ function useCloudProfile() {
   const unseenFavorites = favorites.filter(k => !favoritesSeen.includes(k)).length;
 
   return {
-    loaded, userId, userEmail, profile, updateProfile,
+    loaded, userId, userEmail, profile, updateProfile, profileKnown,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
     reload: load,
@@ -1660,7 +1664,7 @@ function hotelMarkerIconUrl(): string {
 const NOTIFICATIONS: Array<{ id: number; text: string; time: string; read: boolean; destCode: string; category?: string; tipId?: number }> = [];
 
 // ─── HOME ──────────────────────────────────────────────────────────────────────
-function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests, needsName, onSetupProfile }: any) {
+function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests }: any) {
   const [query, setQuery] = useState("");
   const [showSugg, setShowSugg] = useState(false);
   const q = query.trim().toLowerCase();
@@ -1714,15 +1718,6 @@ function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests,
           )}
         </div>
       </div>
-      {needsName && (
-        <div className="section-block">
-          <button type="button" className="profile-nudge" onClick={onSetupProfile}>
-            <span className="profile-nudge-icon"><Icon name="user" size={20} /></span>
-            <span className="profile-nudge-text"><strong>Add your name and role</strong>So colleagues can find you and connect.</span>
-            <Icon name="chevronRight" size={18} />
-          </button>
-        </div>
-      )}
       <DonationReminderCard />
       {recentDests.length > 0 && (
         <div className="section-block">
@@ -3427,6 +3422,52 @@ function NotificationsScreen({ onBack, notes, onMarkAllRead, adminSignups, onNot
   );
 }
 
+// First thing a new account sees: tips, comments and connections all need a name and role, so
+// the rest of the app stays closed until those are filled in.
+function ProfileSetupScreen({ profile, email, updateProfile }: { profile: any; email: string | null; updateProfile: (u: any) => Promise<{ ok: boolean; message?: string }> }) {
+  const suggested = (email || "").split("@")[0].replace(/[._]+/g, " ").replace(/\d+/g, "").trim()
+    .split(" ").filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+  const [name, setName] = useState(profile?.name || suggested);
+  const [role, setRole] = useState(profile?.role || "Cabin Crew");
+  const [base, setBase] = useState(profile?.base || "AMS");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    if (!name.trim() || saving) return;
+    setSaving(true); setError("");
+    const result = await updateProfile({ name: name.trim(), role, base });
+    setSaving(false);
+    if (!result.ok) setError(result.message || "unknown error");
+  }
+  return (
+    <div className="app-shell">
+      <div className="auth-screen setup-screen">
+        <div className="auth-logo">Wing<span>Tips</span></div>
+        <div className="auth-title">Set up your profile</div>
+        <div className="auth-subtitle">Your name and role show on the tips and comments you post, and let colleagues find and connect with you.</div>
+        <div className="auth-form">
+          <label className="pef-label" htmlFor="setup-name">Full name</label>
+          <input id="setup-name" className="auth-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Maria Jansen" autoComplete="name" />
+          <label className="pef-label" htmlFor="setup-role">Role</label>
+          <select id="setup-role" className="auth-input" value={role} onChange={e => setRole(e.target.value)}>
+            <option>Captain</option>
+            <option>First Officer</option>
+            <option>Senior Purser</option>
+            <option>Cabin Crew</option>
+          </select>
+          <label className="pef-label" htmlFor="setup-base">Home base</label>
+          <select id="setup-base" className="auth-input" value={base} onChange={e => setBase(e.target.value)}>
+            {["AMS", "RTM", "EIN", "GRQ", "MST"].map(b => <option key={b}>{b}</option>)}
+          </select>
+          {error && <div className="auth-error">Couldn't save your profile: {error}</div>}
+          <button className="auth-btn" onClick={save} disabled={!name.trim() || saving}>{saving ? "Saving…" : "Continue"}</button>
+          <button className="auth-link-btn" onClick={() => supabase.auth.signOut()}>Not you? Log out</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AccountSection() {
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -4285,7 +4326,7 @@ function AppContent() {
   const topNavRef = useRef<HTMLDivElement | null>(null);
   const { notes: notifications, markAllRead } = useNotifications();
   const {
-    loaded: profileLoaded, userId, userEmail, profile, updateProfile,
+    loaded: profileLoaded, userId, userEmail, profile, updateProfile, profileKnown,
     recentDests, visitDest,
     favorites, toggleFavorite, unseenFavorites, markFavoritesSeen,
     reload: reloadProfile,
@@ -4372,6 +4413,10 @@ function AppContent() {
     return () => window.removeEventListener("resize", measure);
   }, [profileLoaded, recsLoaded]);
 
+  if (profileLoaded && userId && profileKnown && !profile.name?.trim()) {
+    return <ProfileSetupScreen profile={profile} email={userEmail} updateProfile={updateProfile} />;
+  }
+
   if (!profileLoaded || !recsLoaded) {
     return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)"}}><Icon name="loader" size={28} className="spin" /></div></div>;
   }
@@ -4403,7 +4448,7 @@ function AppContent() {
           the top and bottom nav, the same way DestScreen's own .map-overlay is bounded
           by .screen -- instead of position:fixed with a guessed/measured viewport offset. */}
       <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {screen === "home"          && <HomeScreen needsName={!profile.name?.trim()} onSetupProfile={() => { setProfileTab("tips"); setScreen("profile"); }} onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
+        {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
         {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} isAdmin={adminSignups.isAdmin} tripLists={tripLists} me={profile} />}
         {screen === "edittip" && editingTip && <AddRecommendationScreen key={`edit-${editingTip.id}`} editTip={editingTip} onBack={() => { const t = editingTip; setEditingTip(null); setSelectedDest(t.destCode); setActiveCategory(t.category); setScreen("dest"); }} selectedDest={editingTip.destCode} onSubmit={handleRecommendationSubmitted} onUpdate={handleRecommendationUpdated} profile={profile} defaultCategory={editingTip.category} />}
         {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
