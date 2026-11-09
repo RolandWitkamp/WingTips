@@ -14,7 +14,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.25.7";
+const APP_VERSION = "1.25.8";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -2640,6 +2640,27 @@ function buildRouteFromGpx(text: string) {
   return { name: parsed.name, points: pts, ...stats, ...(timing || {}), detectedType: detectActivityType(parsed.type, parsed.name), gpxText: text };
 }
 
+// Strava has no GPX export in its phone app, but strava.com/activities/<id>/export_gpx downloads
+// one for whoever is signed in to strava.com in the browser. So: paste the link the Strava app's
+// Share → Copy link gives, and open that export URL. Share links are usually short
+// strava.app.link redirects -- the resolve-strava-link edge function follows those server-side.
+// (Strava's API isn't used: its terms don't allow showing someone's data to other users.)
+function stravaExportFromUrl(u: string): string | null {
+  const m = u.match(/strava\.com\/(activities|routes)\/(\d+)/);
+  return m ? `https://www.strava.com/${m[1]}/${m[2]}/export_gpx` : null;
+}
+async function resolveStravaExport(text: string): Promise<string | null> {
+  const url = (text.match(/https?:\/\/\S+/) || [])[0];
+  if (!url) return null;
+  const direct = stravaExportFromUrl(url);
+  if (direct) return direct;
+  if (!/(^|\.)strava\.app\.link\//.test(url.replace(/^https?:\/\//, ""))) return null;
+  try {
+    const { data } = await supabase.functions.invoke("resolve-strava-link", { body: { url } });
+    return data?.url ? stravaExportFromUrl(data.url) : null;
+  } catch { return null; }
+}
+
 // Small line drawing of the track for the tip card -- plain SVG, no map load or API cost.
 function RouteSketch({ points, width = 120, height = 72 }: { points: RoutePoint[]; width?: number; height?: number }) {
   const lat0 = points[0][0] * Math.PI / 180;
@@ -2814,9 +2835,9 @@ function PinPickerOverlay({ initial, fallbackCity, fallbackCountry, onPick, onCl
   );
 }
 
-function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, profile, defaultCategory, editTip }: {
+function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, profile, defaultCategory, editTip, sharedGpx }: {
   onBack: () => void; selectedDest: any; onSubmit: (code: string, tip: any) => Promise<boolean>;
-  onUpdate?: (tipId: any, code: string, tip: any) => Promise<true | "network" | "denied">; profile: any; defaultCategory: any; editTip?: any;
+  onUpdate?: (tipId: any, code: string, tip: any) => Promise<true | "network" | "denied">; profile: any; defaultCategory: any; editTip?: any; sharedGpx?: string;
 }) {
   const e0: any = editTip || null;
   const e0Text = e0 ? splitTipText(e0.text) : null;
@@ -2860,6 +2881,42 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   useEffect(() => { const g = activityGroupOf(activityType); if (g) setActivityGroup(g.id); }, [activityType]);
   const [route, setRoute] = useState<any>(e0?.extras?.route || null);
   const [routeError, setRouteError] = useState("");
+  const [stravaLink, setStravaLink] = useState("");
+  const [stravaExport, setStravaExport] = useState<string | null>(null);
+  const [stravaBusy, setStravaBusy] = useState(false);
+  const [stravaOpened, setStravaOpened] = useState(false);
+  useEffect(() => {
+    setStravaExport(null); setStravaOpened(false); setRouteError("");
+    if (!stravaLink.trim()) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setStravaBusy(true);
+      const exp = await resolveStravaExport(stravaLink);
+      if (cancelled) return;
+      setStravaBusy(false);
+      if (exp) setStravaExport(exp);
+      else setRouteError("Couldn't read that as a Strava activity or route link. Use Share → Copy link in the Strava app.");
+    }, 300);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [stravaLink]);
+  function importGpx(text: string) {
+    setRouteError("");
+    const r = buildRouteFromGpx(text);
+    if (!r) { setRouteError("That doesn't look like a GPX file with a route in it. Export it as GPX and try again."); return; }
+    setRoute(r);
+    setStravaLink("");
+    const start = r.points[0];
+    if (!placeCoords) { setPlaceCoords({ lat: String(start[0]), lon: String(start[1]) }); setPinnedManually(true); }
+    const type = activityType || r.detectedType || ACTIVITY_GROUPS.find(g => g.id === activityGroup)?.types[0] || "Hike";
+    if (!activityType) setActivityType(type);
+    if (!activityDuration.trim()) setActivityDuration(routeSummary(r, type));
+    if (!place.trim() && r.name) { justPickedRef.current = true; setPlace(r.name); }
+  }
+  // A GPX shared to WingTips from another app (Android share menu) arrives here once.
+  const sharedGpxDone = useRef(false);
+  useEffect(() => {
+    if (sharedGpx && !sharedGpxDone.current) { sharedGpxDone.current = true; importGpx(sharedGpx); }
+  }, [sharedGpx]);
   const [googlePlaceId, setGooglePlaceId] = useState<string>(e0?.extras?.placeId || "");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [visibility, setVisibility] = useState<"public" | "connections">(e0?.visibility === "connections" ? "connections" : "public");
@@ -3263,21 +3320,28 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
                     <input type="file" style={{ display: "none" }} onChange={async (e: any) => {
                       const f: File | undefined = e.target.files?.[0];
                       e.target.value = "";
-                      setRouteError("");
                       if (!f) return;
                       if (f.size > 8 * 1024 * 1024) { setRouteError("That file is too big (max 8 MB)."); return; }
-                      const r = buildRouteFromGpx(await f.text());
-                      if (!r) { setRouteError("That doesn't look like a GPX file with a route in it. Export it as GPX and try again."); return; }
-                      setRoute(r);
-                      const start = r.points[0];
-                      if (!placeCoords) { setPlaceCoords({ lat: String(start[0]), lon: String(start[1]) }); setPinnedManually(true); }
-                      const type = activityType || r.detectedType || ACTIVITY_GROUPS.find(g => g.id === activityGroup)?.types[0] || "Hike";
-                      if (!activityType) setActivityType(type);
-                      if (!activityDuration.trim()) setActivityDuration(routeSummary(r, type));
-                      if (!place.trim() && r.name) { justPickedRef.current = true; setPlace(r.name); }
+                      importGpx(await f.text());
                     }} />
                   </label>
-                  <div className="maps-hint" style={{ display: "block", lineHeight: 1.5 }}>Strava: on strava.com open the activity or route, then ··· → <strong>Export GPX</strong>. Komoot, AllTrails, Wikiloc and Garmin can all export GPX too.</div>
+                  <div className="strava-link-box">
+                    <div className="form-lbl" style={{ marginBottom: 4 }}>From Strava</div>
+                    <div className="toggle-sub" style={{ marginBottom: 8 }}>In the Strava app open your activity → <strong>Share</strong> → <strong>Copy link</strong>, and paste it here.</div>
+                    <div className="place-search-row">
+                      <input className="form-inp" style={{ flex: 1 }} placeholder="Paste Strava link" value={stravaLink} inputMode="url" autoComplete="off"
+                        onChange={e => setStravaLink(e.target.value)} />
+                      {stravaBusy && <span className="sugg-spinner"><Icon name="loader" size={18} color="var(--accent)" className="spin" /></span>}
+                    </div>
+                    {stravaExport && (
+                      <ol className="strava-steps">
+                        <li><a className="route-action-btn" href={stravaExport} target="_blank" rel="noreferrer" onClick={() => setStravaOpened(true)}><Icon name="download" size={15} />Download GPX from Strava</a></li>
+                        <li className={stravaOpened ? "" : "strava-step-dim"}>Then tap <strong>Add route (GPX)</strong> above and pick the file you just downloaded.</li>
+                      </ol>
+                    )}
+                    {stravaExport && <div className="maps-hint" style={{ display: "block", lineHeight: 1.5 }}>You need to be signed in to strava.com in your phone's browser (once). Works for your own activities and routes.</div>}
+                  </div>
+                  <div className="maps-hint" style={{ display: "block", lineHeight: 1.5 }}>Komoot, Garmin Connect, AllTrails and Wikiloc can export GPX straight from their app.</div>
                 </>
               )}
               {routeError && <div className="form-notice" style={{ color: "#B91C1C" }}>{routeError}</div>}
@@ -4900,6 +4964,25 @@ function AppContent() {
     setScreen("search");
   }
 
+  // Android share menu → WingTips: the service worker parks the shared GPX in a cache and opens
+  // /?shared-gpx=1. Picked up here once signed in, straight into a new Outdoor & Activities tip.
+  const [sharedGpx, setSharedGpx] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has("shared-gpx")) return;
+    (async () => {
+      try {
+        const cache = await caches.open("wingtips-share");
+        const res = await cache.match("/__shared-gpx");
+        await cache.delete("/__shared-gpx");
+        window.history.replaceState(null, "", window.location.pathname);
+        if (!res) return;
+        setSharedGpx(await res.text());
+        setAddTipContext({ code: null, category: "activities" as any });
+        setScreen("addrecommendation");
+      } catch { /* nothing shared */ }
+    })();
+  }, []);
+
   function handleAddTip(code, category) { setSelectedDest(code); setAddTipContext({ code, category }); setScreen("addrecommendation"); }
 
   // The Categories/Explore sheet and the map overlay both need to stop short of the top nav
@@ -4954,7 +5037,7 @@ function AppContent() {
         {screen === "home"          && <HomeScreen onSearch={handleSearch} onDestClick={code => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} addedTips={addedTips} recentDests={recentDests} />}
         {screen === "dest"          && selectedDest && <DestScreen key={selectedDest + (addedTips[selectedDest]?.length || 0)} code={selectedDest} onBack={() => setScreen("home")} onAddTip={handleAddTip} activeCategory={activeCategory} setActiveCategory={setActiveCategory} connections={connections} favorites={favorites} onToggleFavorite={toggleFavorite} extraTips={addedTips[selectedDest] || []} focusTipId={focusTipId} onFocusConsumed={() => setFocusTipId(null)} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} onToggleLike={toggleLike} onAddComment={addComment} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} isAdmin={adminSignups.isAdmin} tripLists={tripLists} me={profile} />}
         {screen === "edittip" && editingTip && <AddRecommendationScreen key={`edit-${editingTip.id}`} editTip={editingTip} onBack={() => { const t = editingTip; setEditingTip(null); setSelectedDest(t.destCode); setActiveCategory(t.category); setScreen("dest"); }} selectedDest={editingTip.destCode} onSubmit={handleRecommendationSubmitted} onUpdate={handleRecommendationUpdated} profile={profile} defaultCategory={editingTip.category} />}
-        {screen === "addrecommendation" && <AddRecommendationScreen onBack={() => addTipContext.code ? setScreen("dest") : setScreen("home")} selectedDest={selectedDest} onSubmit={handleRecommendationSubmitted} profile={profile} defaultCategory={addTipContext.category} />}
+        {screen === "addrecommendation" && <AddRecommendationScreen key={sharedGpx ? "shared" : "new"} sharedGpx={sharedGpx} onBack={() => { setSharedGpx(undefined); addTipContext.code ? setScreen("dest") : setScreen("home"); }} selectedDest={selectedDest} onSubmit={(c: string, t: any) => { setSharedGpx(undefined); return handleRecommendationSubmitted(c, t); }} profile={profile} defaultCategory={addTipContext.category} />}
         {screen === "search"        && <SearchResultsScreen query={searchQuery} addedTips={addedTips} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onBack={() => setScreen("home")} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} tripNotifs={tripNotifs} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}

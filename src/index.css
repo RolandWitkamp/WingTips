@@ -600,3 +600,8 @@ body {
 .auth-back-btn { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; background: none; border: none; color: var(--navy); font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; margin-bottom: 16px; padding: 0; }
 .auth-back-btn:hover { color: var(--accent); }
 .activity-type-row { margin-top: 8px; }
+.strava-link-box { margin-top: 12px; padding: 12px; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-sm); }
+.strava-steps { margin: 10px 0 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text); line-height: 1.5; }
+.strava-steps .route-action-btn { display: inline-flex; flex: none; padding: 10px 14px; background: #FC4C02; color: #fff; }
+.strava-step-dim { color: var(--text3); }
+

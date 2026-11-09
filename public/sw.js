@@ -6,13 +6,28 @@ const CACHE = "wingtips-v1";
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
-    for (const key of await caches.keys()) if (key !== CACHE) await caches.delete(key);
+    for (const key of await caches.keys()) if (key !== CACHE && key !== "wingtips-share") await caches.delete(key);
     await self.clients.claim();
   })());
 });
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
+  // Android share menu → WingTips (manifest share_target): GitHub Pages can't take a POST, so the
+  // worker catches it, parks the shared GPX in a cache and opens the app, which picks it up.
+  if (req.method === "POST" && new URL(req.url).pathname === "/share-gpx") {
+    event.respondWith((async () => {
+      try {
+        const file = (await req.formData()).get("gpx");
+        if (file && typeof file !== "string") {
+          const cache = await caches.open("wingtips-share");
+          await cache.put("/__shared-gpx", new Response(await file.text(), { headers: { "Content-Type": "application/gpx+xml" } }));
+        }
+      } catch { /* open the app anyway */ }
+      return Response.redirect("/?shared-gpx=1", 303);
+    })());
+    return;
+  }
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   const isPage = req.mode === "navigate";
