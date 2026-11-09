@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -13,7 +14,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.25.4";
+const APP_VERSION = "1.25.5";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -96,14 +97,33 @@ function ensurePlacesServices(): boolean {
     return true;
   } catch { return false; }
 }
-function googlePlacePredictions(query: string, destCity: string): Promise<any[]> {
+function googlePlacePredictionsFor(input: string): Promise<any[]> {
   return new Promise(resolve => {
     try {
-      acService.getPlacePredictions({ input: `${query}, ${destCity}` }, (preds: any, status: string) => {
+      acService.getPlacePredictions({ input }, (preds: any, status: string) => {
         resolve(status === "OK" && preds ? preds : []);
       });
     } catch { resolve([]); }
   });
+}
+// Used to search only "<query>, <destination city>", which missed anything outside that city:
+// a destination code like SJO covers a whole country's worth of layover trips (La Fortuna is
+// three hours from San José), so "Raul Castaño Mirador, San José" came back empty. Search the
+// city, the whole country and the bare query side by side and merge them, city hits first.
+async function googlePlacePredictions(query: string, destCity: string, destCountry: string): Promise<any[]> {
+  const lists = await Promise.all([
+    googlePlacePredictionsFor(`${query}, ${destCity}`),
+    googlePlacePredictionsFor(`${query}, ${destCountry}`),
+    googlePlacePredictionsFor(query),
+  ]);
+  const seen = new Set<string>();
+  const merged: any[] = [];
+  for (const p of lists.flat()) {
+    if (!p?.place_id || seen.has(p.place_id)) continue;
+    seen.add(p.place_id);
+    merged.push(p);
+  }
+  return merged.slice(0, 8);
 }
 function googlePlaceDetails(placeId: string): Promise<any | null> {
   return new Promise(resolve => {
@@ -314,6 +334,8 @@ function splitTipText(text: string): { title: string; body: string } {
   return i < 0 ? { title: rest.trim(), body: "" } : { title: rest.slice(0, i).trim(), body: rest.slice(i + 1).trim() };
 }
 const NIGHTLIFE_TYPES = ["Bar", "Rooftop bar", "Pub", "Nightclub", "Live music", "Shows & theatre", "Karaoke"];
+const ACTIVITY_TYPES = ["Hike", "Viewpoint", "Waterfall", "Beach & water", "Wildlife & nature", "Sightseeing", "Adventure", "Tour & excursion"];
+const ACTIVITY_LEVELS = ["Easy", "Moderate", "Challenging"];
 function ExtrasBadges({ tip }: { tip: any }) {
   const x = tip?.extras;
   if (!x) return null;
@@ -323,6 +345,9 @@ function ExtrasBadges({ tip }: { tip: any }) {
       {tip.category === "fitness" && x.classes === true && <span className="tip-extra-badge"><Icon name="users" size={13} />Classes</span>}
       {tip.category === "fitness" && x.classes === false && <span className="tip-extra-badge">No classes</span>}
       {tip.category === "nightlife" && x.nightlifeType && <span className="tip-extra-badge"><CategoryIcon id="nightlife" size={13} color="currentColor" />{x.nightlifeType}</span>}
+      {tip.category === "activities" && x.activityType && <span className="tip-extra-badge"><CategoryIcon id="activities" size={13} color="currentColor" />{x.activityType}</span>}
+      {tip.category === "activities" && x.difficulty && <span className="tip-extra-badge">{x.difficulty}</span>}
+      {tip.category === "activities" && x.duration && <span className="tip-extra-badge"><Icon name="clock" size={13} />{x.duration}</span>}
     </>
   );
 }
@@ -1549,6 +1574,7 @@ const CATEGORIES = [
   { id: "nightlife",     label: "Nightlife",       color: "#6366F1" },
   { id: "accommodation", label: "Accommodation",   color: "#0EA5E9" },
   { id: "working",       label: "Working",         color: "#64748B" },
+  { id: "activities",    label: "Hikes & Activities", color: "#047857" },
   { id: "roadtrip",      label: "Trips & Tours",   color: "#F59E0B" },
   { id: "other",         label: "Other",           color: "#78716C" },
 ];
@@ -1566,6 +1592,7 @@ const CATEGORY_ICON_PATHS: Record<string, string> = {
   accommodation: '<path d="M3 18v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5"/><path d="M3 18v2M21 18v2"/><path d="M7 11V8a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v3"/>',
   working: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M2 20h20"/>',
   gems: '<path d="M6 3h12l4 6-10 12L2 9Z"/><path d="M2 9h20M9 3l-2 6M15 3l2 6"/>',
+  activities: '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>',
   roadtrip: '<path d="M3 16V12a2 2 0 0 1 .4-1.2L6 7h12l2.6 3.8A2 2 0 0 1 21 12v4"/><path d="M3 16h18"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="17" cy="17.5" r="1.5"/>',
   other: '<path d="M12 21s-7-6.5-7-11a7 7 0 1 1 14 0c0 4.5-7 11-7 11Z"/><circle cx="12" cy="10" r="2.5"/>',
 };
@@ -2058,10 +2085,11 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   const [filterGem, setFilterGem] = useState(false);
   const [filterClasses, setFilterClasses] = useState(false);
   const [filterNight, setFilterNight] = useState("");
+  const [filterActivity, setFilterActivity] = useState("");
   // Jetlag Proof / Solo Friendly / Quick Bite only ever make sense for food -- clear them if the
   // crew member switches category with one still active, so it can't silently keep filtering a
   // category where it no longer shows as an option.
-  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } if (activeCategory !== "roadtrip") setFilterMode(""); setFilterGem(false); setFilterClasses(false); setFilterNight(""); }, [activeCategory]);
+  useEffect(() => { if (activeCategory !== "food") { setFilterJetlag(false); setFilterSolo(false); setFilterQuickBite(false); setFilterCrew(false); } if (activeCategory !== "roadtrip") setFilterMode(""); setFilterGem(false); setFilterClasses(false); setFilterNight(""); setFilterActivity(""); }, [activeCategory]);
 
   const isAll = activeCategory === "all";
   const tipsForCat = crewTips
@@ -2075,6 +2103,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     .filter(t => !filterGem || t.extras?.hiddenGem)
     .filter(t => !filterClasses || t.extras?.classes === true)
     .filter(t => !filterNight || t.extras?.nightlifeType === filterNight)
+    .filter(t => !filterActivity || t.extras?.activityType === filterActivity)
     .slice()
     .sort((a, b) => sortBy === "liked"
       ? b.likes - a.likes
@@ -2266,6 +2295,9 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         <div className="sort-filter-bar crew-filter-bar">
           <button className={`sf-btn${filterGem ? " active" : ""}`} onClick={() => setFilterGem(v => !v)}><CategoryIcon id="gems" size={14} color="currentColor" />Hidden gems</button>
           {activeCategory === "fitness" && <button className={`sf-btn${filterClasses ? " active" : ""}`} onClick={() => setFilterClasses(v => !v)}><Icon name="users" size={14} />Classes</button>}
+          {activeCategory === "activities" && ACTIVITY_TYPES.map(t => (
+            <button key={t} className={`sf-btn${filterActivity === t ? " active" : ""}`} onClick={() => setFilterActivity(v => v === t ? "" : t)}>{t}</button>
+          ))}
           {activeCategory === "nightlife" && NIGHTLIFE_TYPES.map(t => (
             <button key={t} className={`sf-btn${filterNight === t ? " active" : ""}`} onClick={() => setFilterNight(v => v === t ? "" : t)}>{t}</button>
           ))}
@@ -2402,22 +2434,59 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
 }
 
 // ─── ADD RECOMMENDATION ────────────────────────────────────────────────────────
-function osmCategoryGuess(cls: string, type: string): string {
-  if (cls === "amenity") {
-    if (["restaurant","cafe","bar","fast_food","food_court","pub","biergarten"].includes(type)) return "food";
-    if (["hotel","hostel","guest_house","motel"].includes(type)) return "rest";
-    if (["bus_station","taxi","ferry_terminal","car_rental"].includes(type)) return "transport";
-    if (["hospital","pharmacy","police","clinic","doctors"].includes(type)) return "safety";
-    if (["nightclub","theatre","cinema","arts_centre"].includes(type)) return "gems";
+// Full-screen map for pinpointing a place search can't find (a trailhead, a mirador, a tiny
+// coffee bar missing from Google/OSM): the pin stays fixed in the middle and the map moves
+// under it -- easier to aim with a thumb than tapping a tiny spot. Satellite view helps for
+// trails and viewpoints. Rendered into <body> via a portal so no animated/transformed parent
+// can throw off its position:fixed.
+function PinPickerOverlay({ initial, fallbackCity, fallbackCountry, onPick, onClose }: {
+  initial: { lat: number; lng: number } | null; fallbackCity: string; fallbackCountry: string;
+  onPick: (c: { lat: number; lng: number }) => void; onClose: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await loadGoogleMaps();
+      let center = initial;
+      if (!center) center = await geocodeCity(fallbackCity, fallbackCountry);
+      if (cancelled || !containerRef.current) return;
+      const google = (window as any).google;
+      if (!ok || !google?.maps) { setFailed(true); return; }
+      mapRef.current = new google.maps.Map(containerRef.current, {
+        center: center || { lat: 52.3676, lng: 4.9041 }, zoom: initial ? 16 : 12,
+        streetViewControl: false, fullscreenControl: false, clickableIcons: false, gestureHandling: "greedy",
+        mapTypeControl: true,
+        mapTypeControlOptions: { mapTypeIds: ["roadmap", "hybrid"], style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR, position: google.maps.ControlPosition.TOP_LEFT },
+      });
+      setReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  function confirm() {
+    const c = mapRef.current?.getCenter();
+    if (c) onPick({ lat: c.lat(), lng: c.lng() });
   }
-  if (cls === "tourism") {
-    if (["hotel","hostel","motel","apartment"].includes(type)) return "rest";
-    if (["attraction","museum","gallery","viewpoint","zoo","theme_park"].includes(type)) return "gems";
-  }
-  if (cls === "railway" || cls === "aeroway" || (cls === "public_transport")) return "transport";
-  if (cls === "leisure") return "gems";
-  if (cls === "shop") return "food";
-  return "gems";
+  return createPortal(
+    <div className="pin-picker" role="dialog" aria-label="Pin the location on the map">
+      <div className="map-header">
+        <span className="map-header-title">Move the map to the spot</span>
+        <button type="button" className="map-close-btn" onClick={onClose}><Icon name="close" size={14} />Cancel</button>
+      </div>
+      <div className="pin-picker-map">
+        <div ref={containerRef} className="map-container" style={{ height: "100%" }} />
+        {ready && <div className="pin-picker-crosshair" aria-hidden="true"><Icon name="pin" size={40} color="#E11D48" strokeWidth={2.2} /></div>}
+        {failed && <div className="map-no-coords">The map couldn't load. Check your connection and try again.</div>}
+      </div>
+      <div className="pin-picker-footer">
+        <button type="button" className="auth-btn" style={{ width: "100%" }} disabled={!ready} onClick={confirm}>Use this spot</button>
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, profile, defaultCategory, editTip }: {
@@ -2457,6 +2526,9 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   const [hiddenGem, setHiddenGem] = useState(!!e0?.extras?.hiddenGem);
   const [classes, setClasses] = useState<"" | "yes" | "no">(e0?.extras?.classes === true ? "yes" : e0?.extras?.classes === false ? "no" : "");
   const [nightlifeType, setNightlifeType] = useState<string>(e0?.extras?.nightlifeType || "");
+  const [activityType, setActivityType] = useState<string>(e0?.extras?.activityType || "");
+  const [difficulty, setDifficulty] = useState<string>(e0?.extras?.difficulty || "");
+  const [activityDuration, setActivityDuration] = useState<string>(e0?.extras?.duration || "");
   const [googlePlaceId, setGooglePlaceId] = useState<string>(e0?.extras?.placeId || "");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [visibility, setVisibility] = useState<"public" | "connections">(e0?.visibility === "connections" ? "connections" : "public");
@@ -2482,6 +2554,10 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   const [suggSource, setSuggSource] = useState<"google" | "nominatim">("nominatim");
   const [loadingSugg, setLoadingSugg] = useState(false);
   const [placeCoords, setPlaceCoords] = useState<{ lat: string; lon: string } | null>(e0?.coords || null);
+  // Set when the location came from dropping a pin on the map rather than a search result --
+  // then typing/changing the place name must not throw the pinned location away.
+  const [pinnedManually, setPinnedManually] = useState(false);
+  const [showPinPicker, setShowPinPicker] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   // When editing, the prefilled place name must not immediately pop up search suggestions.
   const justPickedRef = useRef(!!e0);
@@ -2515,7 +2591,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
         // (spas, restaurants, ...) -- try it first, fall back to Nominatim if it's unavailable or
         // comes up empty, same two-tier approach used for hotel search in Pillow Report.
         if (await loadGoogleMaps() && ensurePlacesServices()) {
-          const preds = await googlePlacePredictions(place, dest.city);
+          const preds = await googlePlacePredictions(place, dest.city, dest.country);
           if (place.length >= 3 && preds.length) {
             setSuggSource("google");
             setSuggestions(preds);
@@ -2524,9 +2600,13 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
             return;
           }
         }
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place + " " + dest.city)}&format=json&limit=6&addressdetails=1&extratags=1&namedetails=1`;
-        const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-        const data = await res.json();
+        const osm = async (where: string) => {
+          const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place + " " + where)}&format=json&limit=6&addressdetails=1&extratags=1&namedetails=1`;
+          const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+          return await res.json();
+        };
+        let data = await osm(dest.city);
+        if (!data?.length) data = await osm(dest.country);
         setSuggSource("nominatim");
         setSuggestions(data);
         setShowDropdown(data.length > 0);
@@ -2538,6 +2618,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
 
   async function pickSuggestion(s: any) {
     justPickedRef.current = true;
+    setPinnedManually(false);
     setSuggestions([]);
     setShowDropdown(false);
     if (suggSource === "google") {
@@ -2554,16 +2635,17 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     setGooglePlaceId("");
     setPlace(shortName);
     setPlaceCoords({ lat: s.lat, lon: s.lon });
-    setCategory(osmCategoryGuess(s.class, s.type));
     setOpeningHours(s.extratags?.opening_hours || "");
     setJetlagProof(jetlagProofFromOsmHours(s.extratags?.opening_hours));
   }
 
   function handlePlaceChange(e: any) {
     setPlace(e.target.value);
-    setGooglePlaceId("");
-    setPlaceCoords(null);
-    setJetlagProof(false);
+    if (!pinnedManually) {
+      setGooglePlaceId("");
+      setPlaceCoords(null);
+      setJetlagProof(false);
+    }
   }
 
   function handleSubmit() {
@@ -2592,6 +2674,9 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     if (hiddenGem) extras.hiddenGem = true;
     if (category === "fitness" && classes) extras.classes = classes === "yes";
     if (category === "nightlife" && nightlifeType) extras.nightlifeType = nightlifeType;
+    if (category === "activities" && activityType) extras.activityType = activityType;
+    if (category === "activities" && difficulty) extras.difficulty = difficulty;
+    if (category === "activities" && activityDuration.trim()) extras.duration = activityDuration.trim();
     if (!isRoadTrip && googlePlaceId) extras.placeId = googlePlaceId;
     if (Object.keys(extras).length) newTip.extras = extras;
     if (isRoadTrip) {
@@ -2792,6 +2877,31 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
           </div>
         )}
 
+        {category === "activities" && (
+          <>
+            <div className="form-group">
+              <label className="form-lbl">What kind of activity? <span className="form-lbl-hint">(optional)</span></label>
+              <div className="price-chip-row">
+                {ACTIVITY_TYPES.map(t => (
+                  <button key={t} type="button" className={`price-chip${activityType === t ? " active" : ""}`} onClick={() => setActivityType(v => v === t ? "" : t)}>{t}</button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-lbl">Difficulty <span className="form-lbl-hint">(optional)</span></label>
+              <div className="price-chip-row">
+                {ACTIVITY_LEVELS.map(t => (
+                  <button key={t} type="button" className={`price-chip${difficulty === t ? " active" : ""}`} onClick={() => setDifficulty(v => v === t ? "" : t)}>{t}</button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-lbl" htmlFor="act-duration">Duration / distance <span className="form-lbl-hint">(optional)</span></label>
+              <input id="act-duration" className="form-inp" placeholder="e.g. 2–3 hours, 6 km loop" value={activityDuration} onChange={e => setActivityDuration(e.target.value)} />
+            </div>
+          </>
+        )}
+
         {isRoadTrip ? (
           <>
             <div className="form-group">
@@ -2849,6 +2959,16 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
               })}
             </div>
           )}
+          {showPinPicker && dest && (
+            <PinPickerOverlay
+              initial={placeCoords ? { lat: parseFloat(placeCoords.lat), lng: parseFloat(placeCoords.lon) } : hotelCoords}
+              fallbackCity={dest.city} fallbackCountry={dest.country}
+              onClose={() => setShowPinPicker(false)}
+              onPick={c => { setPlaceCoords({ lat: c.lat.toFixed(6), lon: c.lng.toFixed(6) }); setPinnedManually(true); setGooglePlaceId(""); setShowPinPicker(false); }} />
+          )}
+          <button type="button" className="pin-on-map-btn" onClick={() => setShowPinPicker(true)}>
+            <Icon name="pin" size={15} />{pinnedManually ? "Pinned on map · adjust" : placeCoords ? "Adjust pin on map" : "Can't find it? Pin it on the map"}
+          </button>
           {mapsUrl && <div className="maps-hint">Tap Maps to verify the location in Google Maps</div>}
           {distanceToHotel && <div className="maps-hint"><Icon name="hotel" size={14} />{distanceToHotel} from the crew hotel ({dest.crewHotel || "unknown"})</div>}
         </div>
@@ -3942,6 +4062,7 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
   const [filterGem, setFilterGem] = useState(false);
   const [filterClasses, setFilterClasses] = useState(false);
   const [filterNight, setFilterNight] = useState("");
+  const [filterActivity, setFilterActivity] = useState("");
   const isFood = category === "food";
   const isTrip = category === "roadtrip";
   const results: Array<{ tip: any; destCode: string; destCity: string }> = [];
@@ -3960,7 +4081,8 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
     .filter(r => !isTrip || !filterMode || tripModes(r.tip.trip).includes(filterMode))
     .filter(r => !filterGem || r.tip.extras?.hiddenGem)
     .filter(r => !filterClasses || r.tip.extras?.classes === true)
-    .filter(r => !filterNight || r.tip.extras?.nightlifeType === filterNight);
+    .filter(r => !filterNight || r.tip.extras?.nightlifeType === filterNight)
+    .filter(r => !filterActivity || r.tip.extras?.activityType === filterActivity);
 
   return (
     <div className="screen">
@@ -3973,6 +4095,9 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
         <div className="sort-filter-bar crew-filter-bar">
           <button className={`sf-btn${filterGem ? " active" : ""}`} onClick={() => setFilterGem(v => !v)}><CategoryIcon id="gems" size={14} color="currentColor" />Hidden gems</button>
           {category === "fitness" && <button className={`sf-btn${filterClasses ? " active" : ""}`} onClick={() => setFilterClasses(v => !v)}><Icon name="users" size={14} />Classes</button>}
+          {category === "activities" && ACTIVITY_TYPES.map(t => (
+            <button key={t} className={`sf-btn${filterActivity === t ? " active" : ""}`} onClick={() => setFilterActivity(v => v === t ? "" : t)}>{t}</button>
+          ))}
           {category === "nightlife" && NIGHTLIFE_TYPES.map(t => (
             <button key={t} className={`sf-btn${filterNight === t ? " active" : ""}`} onClick={() => setFilterNight(v => v === t ? "" : t)}>{t}</button>
           ))}

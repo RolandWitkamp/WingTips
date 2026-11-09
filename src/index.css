@@ -551,6 +551,13 @@ body {
 .app-frame { height: 100vh; height: 100dvh; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; color: var(--text); max-width: 480px; margin: 0 auto; position: relative; }
 .app-frame > .top-nav, .app-frame > .bottom-nav { flex-shrink: 0; }
 
+.pin-on-map-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; background: none; border: none; padding: 4px 0; color: var(--navy); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
+.pin-picker { position: fixed; top: 0; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 480px; height: 100vh; height: 100dvh; z-index: 1000; display: flex; flex-direction: column; background: #fff; }
+.pin-picker-map { position: relative; flex: 1; min-height: 0; }
+/* The pin glyph's tip is at y=21 of 24 (87.5%): lift it by that much so the tip, not the icon box, marks the centre. */
+.pin-picker-crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -87.5%); pointer-events: none; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35)); }
+.pin-picker-footer { flex-shrink: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: #fff; box-shadow: 0 -4px 16px rgba(16,35,63,0.08); }
+
 .app-shell { min-height: 100vh; max-width: 480px; margin: 0 auto; background: var(--bg); display: flex; flex-direction: column; }
 
 /* ─── Landing page ──────────────────────────────────────────────────────── */
