@@ -184,7 +184,8 @@ alter table recommendations add column if not exists crew_friendly boolean not n
 -- Trips & Tours details (mode, guide contact, cost, duration, ...) and up to 6 resized photos.
 alter table recommendations add column if not exists trip jsonb;
 alter table recommendations add column if not exists photos jsonb;
--- Per-category extras: hiddenGem (any category), classes (fitness), nightlifeType (nightlife).
+-- Per-category extras: hiddenGem (any category), classes (fitness), nightlifeType (nightlife),
+-- activityType/difficulty/duration/route (activities; route = simplified GPX track + stats + gpxUrl).
 alter table recommendations add column if not exists extras jsonb;
 
 -- Named lists of saved tips for an upcoming trip, private to their owner.
@@ -316,6 +317,16 @@ drop policy if exists "tip_photos_insert_own" on storage.objects;
 create policy "tip_photos_insert_own" on storage.objects for insert to authenticated with check (bucket_id = 'tip-photos' and (storage.foldername(name))[1] = auth.uid()::text);
 drop policy if exists "tip_photos_delete_own" on storage.objects;
 create policy "tip_photos_delete_own" on storage.objects for delete to authenticated using (bucket_id = 'tip-photos' and owner = auth.uid());
+
+-- Tip routes: original GPX files for Hikes & Activities, downloadable by crew. Same set-up as
+-- tip-photos: public read, each user uploads into a folder named after their user id.
+insert into storage.buckets (id, name, public) values ('tip-routes', 'tip-routes', true) on conflict (id) do nothing;
+drop policy if exists "tip_routes_read" on storage.objects;
+create policy "tip_routes_read" on storage.objects for select using (bucket_id = 'tip-routes');
+drop policy if exists "tip_routes_insert_own" on storage.objects;
+create policy "tip_routes_insert_own" on storage.objects for insert to authenticated with check (bucket_id = 'tip-routes' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "tip_routes_delete_own" on storage.objects;
+create policy "tip_routes_delete_own" on storage.objects for delete to authenticated using (bucket_id = 'tip-routes' and owner = auth.uid());
 
 
 -- Crew search by name or by the part of the e-mail address before the @ (addresses usually hold

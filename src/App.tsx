@@ -14,7 +14,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.25.5";
+const APP_VERSION = "1.25.6";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -1070,6 +1070,25 @@ async function uploadTipPhotos(photos: string[] | undefined, userId: string): Pr
   return out;
 }
 
+// Route files (GPX) for Hikes & Activities: the simplified track lives in extras.route so it
+// loads with the tip; the original file goes to the public "tip-routes" bucket so crew can
+// download it into Strava/Komoot/their watch. The raw text rides along in extras.route.gpxText
+// only until this uploads it -- if the upload fails (e.g. the bucket isn't set up yet) the
+// text is dropped rather than stuffed into the row, and the tip still shows the route.
+const ROUTE_BUCKET = "tip-routes";
+async function uploadTipRoute(tipData: any, userId: string): Promise<any> {
+  const route = tipData?.extras?.route;
+  if (!route?.gpxText) return tipData;
+  const { gpxText, ...rest } = route;
+  let gpxUrl: string | undefined = rest.gpxUrl;
+  try {
+    const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.gpx`;
+    const { error } = await supabase.storage.from(ROUTE_BUCKET).upload(path, new Blob([gpxText], { type: "application/gpx+xml" }), { contentType: "application/gpx+xml", upsert: false });
+    if (!error) gpxUrl = supabase.storage.from(ROUTE_BUCKET).getPublicUrl(path).data.publicUrl;
+  } catch { /* keep the route without a download */ }
+  return { ...tipData, extras: { ...tipData.extras, route: { ...rest, ...(gpxUrl ? { gpxUrl } : {}) } } };
+}
+
 function useRecommendations() {
   const [recs, setRecs] = useState<any[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -1149,6 +1168,7 @@ function useRecommendations() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
     tipData = { ...tipData, photos: await uploadTipPhotos(tipData.photos, user.id) };
+    tipData = await uploadTipRoute(tipData, user.id);
     const row = {
       destination_code: destCode,
       category: tipData.category,
@@ -1194,6 +1214,7 @@ function useRecommendations() {
   async function updateRecommendation(tipId: any, destCode: string, tipData: any) {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) tipData = { ...tipData, photos: await uploadTipPhotos(tipData.photos, user.id) };
+    if (user) tipData = await uploadTipRoute(tipData, user.id);
     const row = {
       destination_code: destCode,
       category: tipData.category,
@@ -1646,6 +1667,8 @@ const UI_ICON_PATHS: Record<string, string> = {
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   tag: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  route: '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>',
+  download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
   map: '<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><path d="M9 3v15M15 6v15"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
@@ -2333,6 +2356,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
                   <div className="crew-card-date">{tip.date}</div>
                 </div>
                 <TipPhotos photos={tip.photos} />
+                <RouteCard tip={tip} />
                 {isAll && <div className="tip-cat-line"><CategoryIcon id={tip.category || "other"} color={CATEGORIES.find(c => c.id === tip.category)?.color} size={15} />{CATEGORIES.find(c => c.id === tip.category)?.label || tip.category}</div>}
                 <TipText text={tip.text} className="crew-card-text" />
                 {tip.category === "roadtrip" && <TripDetails trip={tip.trip} />}
@@ -2434,6 +2458,218 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
 }
 
 // ─── ADD RECOMMENDATION ────────────────────────────────────────────────────────
+// ─── GPX routes ─────────────────────────────────────────────────────────────
+// Parsed in the browser (DOMParser, no library). Strava exports activities and routes as GPX
+// with <trkpt lat lon><ele>; <rtept> (planned routes from other apps) is read too.
+type RoutePoint = [number, number, number?]; // lat, lng, elevation (m)
+function parseGpx(text: string): { points: RoutePoint[]; name: string } | null {
+  try {
+    const doc = new DOMParser().parseFromString(text, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length) return null;
+    let nodes = Array.from(doc.getElementsByTagNameNS("*", "trkpt"));
+    if (!nodes.length) nodes = Array.from(doc.getElementsByTagNameNS("*", "rtept"));
+    const points: RoutePoint[] = [];
+    for (const n of nodes) {
+      const lat = parseFloat(n.getAttribute("lat") || ""), lng = parseFloat(n.getAttribute("lon") || "");
+      if (!isFinite(lat) || !isFinite(lng)) continue;
+      const eleTxt = n.getElementsByTagNameNS("*", "ele")[0]?.textContent;
+      const ele = eleTxt != null ? parseFloat(eleTxt) : NaN;
+      points.push(isFinite(ele) ? [lat, lng, ele] : [lat, lng]);
+    }
+    if (points.length < 2) return null;
+    const nameNode = doc.getElementsByTagNameNS("*", "trk")[0]?.getElementsByTagNameNS("*", "name")[0]
+      || doc.getElementsByTagNameNS("*", "rte")[0]?.getElementsByTagNameNS("*", "name")[0];
+    return { points, name: (nameNode?.textContent || "").trim() };
+  } catch { return null; }
+}
+function segMeters(a: RoutePoint, b: RoutePoint): number {
+  return distanceKm({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }) * 1000;
+}
+// Elevation from a phone GPS jitters by metres every few seconds; summing every wiggle roughly
+// doubles the real climb. Only count a change once it has moved 5 m past the last turning point.
+function routeStats(points: RoutePoint[]) {
+  let dist = 0, gain = 0, loss = 0, maxEle = -Infinity, ref: number | null = null;
+  for (let i = 0; i < points.length; i++) {
+    if (i) dist += segMeters(points[i - 1], points[i]);
+    const e = points[i][2];
+    if (e == null) continue;
+    if (e > maxEle) maxEle = e;
+    if (ref == null) { ref = e; continue; }
+    if (e - ref >= 5) { gain += e - ref; ref = e; }
+    else if (ref - e >= 5) { loss += ref - e; ref = e; }
+  }
+  const hasEle = isFinite(maxEle);
+  return {
+    distanceKm: Math.round(dist / 100) / 10,
+    gainM: hasEle ? Math.round(gain) : undefined,
+    lossM: hasEle ? Math.round(loss) : undefined,
+    maxEleM: hasEle ? Math.round(maxEle) : undefined,
+  };
+}
+// Douglas-Peucker on a local flat projection, loosening the tolerance until the track fits in
+// ~500 points: indistinguishable on a phone map, and small enough to store with the tip.
+function simplifyRoute(points: RoutePoint[], maxPoints = 500): RoutePoint[] {
+  if (points.length <= maxPoints) return points;
+  const lat0 = points[0][0] * Math.PI / 180;
+  const xy = points.map(p => [p[1] * 111320 * Math.cos(lat0), p[0] * 110540]);
+  const run = (tol: number) => {
+    const keep = new Uint8Array(points.length);
+    keep[0] = keep[points.length - 1] = 1;
+    const stack: [number, number][] = [[0, points.length - 1]];
+    while (stack.length) {
+      const [a, b] = stack.pop()!;
+      const [ax, ay] = xy[a], [bx, by] = xy[b];
+      const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
+      let maxD = 0, idx = -1;
+      for (let i = a + 1; i < b; i++) {
+        const d = Math.abs(dy * xy[i][0] - dx * xy[i][1] + bx * ay - by * ax) / len;
+        if (d > maxD) { maxD = d; idx = i; }
+      }
+      if (idx >= 0 && maxD > tol) { keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+    }
+    return points.filter((_, i) => keep[i]);
+  };
+  let tol = 3, out = run(tol);
+  while (out.length > maxPoints) { tol *= 1.6; out = run(tol); }
+  return out;
+}
+// Naismith's rule, a bit gentler for mixed crew fitness: 4.5 km/h plus 1 h per 600 m of climb.
+function estimateHikeTime(distanceKm: number, gainM?: number): string {
+  const h = distanceKm / 4.5 + (gainM || 0) / 600;
+  if (h < 0.75) return `~${Math.max(10, Math.round(h * 60 / 5) * 5)} min`;
+  const half = Math.round(h * 2) / 2;
+  return `~${half % 1 ? `${Math.floor(half)}½` : half} h`;
+}
+function routeSummary(r: any): string {
+  return [`${r.distanceKm} km`, r.gainM != null ? `↑ ${r.gainM} m` : "", estimateHikeTime(r.distanceKm, r.gainM)].filter(Boolean).join(" · ");
+}
+function buildRouteFromGpx(text: string) {
+  const parsed = parseGpx(text);
+  if (!parsed) return null;
+  const stats = routeStats(parsed.points);
+  const pts = simplifyRoute(parsed.points).map(p => {
+    const q: RoutePoint = [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5];
+    if (p[2] != null) q.push(Math.round(p[2]));
+    return q;
+  });
+  return { name: parsed.name, points: pts, ...stats, gpxText: text };
+}
+
+// Small line drawing of the track for the tip card -- plain SVG, no map load or API cost.
+function RouteSketch({ points, width = 120, height = 72 }: { points: RoutePoint[]; width?: number; height?: number }) {
+  const lat0 = points[0][0] * Math.PI / 180;
+  const xs = points.map(p => p[1] * Math.cos(lat0)), ys = points.map(p => -p[0]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 6, span = Math.max(maxX - minX, maxY - minY) || 1;
+  const sc = Math.min((width - pad * 2) / ((maxX - minX) || span), (height - pad * 2) / ((maxY - minY) || span));
+  const ox = (width - (maxX - minX) * sc) / 2, oy = (height - (maxY - minY) * sc) / 2;
+  const pt = (i: number) => `${(ox + (xs[i] - minX) * sc).toFixed(1)},${(oy + (ys[i] - minY) * sc).toFixed(1)}`;
+  const d = points.map((_, i) => pt(i)).join(" ");
+  const [sx, sy] = pt(0).split(","), [ex, ey] = pt(points.length - 1).split(",");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="route-sketch" aria-hidden="true">
+      <polyline points={d} fill="none" stroke="#047857" strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={ex} cy={ey} r={3.5} fill="#fff" stroke="#10233F" strokeWidth={2} />
+      <circle cx={sx} cy={sy} r={3.5} fill="#047857" stroke="#fff" strokeWidth={1.5} />
+    </svg>
+  );
+}
+
+function ElevationProfile({ points }: { points: RoutePoint[] }) {
+  const withEle = points.filter(p => p[2] != null);
+  if (withEle.length < 2) return null;
+  const W = 320, H = 90, padB = 4, padT = 8;
+  let acc = 0;
+  const xs = withEle.map((p, i) => (i ? (acc += segMeters(withEle[i - 1], p)) : 0));
+  const eles = withEle.map(p => p[2] as number);
+  const minE = Math.min(...eles), maxE = Math.max(...eles), range = Math.max(maxE - minE, 20);
+  const total = xs[xs.length - 1] || 1;
+  const line = withEle.map((_, i) => `${(xs[i] / total * W).toFixed(1)},${(padT + (1 - (eles[i] - minE) / range) * (H - padT - padB)).toFixed(1)}`).join(" ");
+  return (
+    <div className="elev-profile">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" width="100%" height={H} role="img" aria-label={`Elevation from ${Math.round(minE)} to ${Math.round(maxE)} metres`}>
+        <polygon points={`0,${H} ${line} ${W},${H}`} fill="rgba(4,120,87,0.15)" />
+        <polyline points={line} fill="none" stroke="#047857" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="elev-labels"><span>{Math.round(minE)} m</span><span>Elevation</span><span>{Math.round(maxE)} m</span></div>
+    </div>
+  );
+}
+
+function RouteViewer({ route, title, onClose }: { route: any; title: string; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleMaps().then(ok => {
+      const google = (window as any).google;
+      if (cancelled || !ref.current) return;
+      if (!ok || !google?.maps) { setFailed(true); return; }
+      const path = route.points.map((p: RoutePoint) => ({ lat: p[0], lng: p[1] }));
+      const map = new google.maps.Map(ref.current, {
+        center: path[0], zoom: 13, streetViewControl: false, fullscreenControl: false, gestureHandling: "greedy",
+        mapTypeId: "terrain", mapTypeControl: true,
+        mapTypeControlOptions: { mapTypeIds: ["terrain", "hybrid"], style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR, position: google.maps.ControlPosition.TOP_LEFT },
+      });
+      new google.maps.Polyline({ path, map, strokeColor: "#047857", strokeWeight: 5, strokeOpacity: 0.9 });
+      const dot = (fill: string, stroke: string) => ({ path: google.maps.SymbolPath.CIRCLE, scale: 7, fillColor: fill, fillOpacity: 1, strokeColor: stroke, strokeWeight: 2.5 });
+      new google.maps.Marker({ position: path[path.length - 1], map, icon: dot("#fff", "#10233F"), title: "Finish" });
+      new google.maps.Marker({ position: path[0], map, icon: dot("#047857", "#fff"), title: "Start", zIndex: 2 });
+      const bounds = new google.maps.LatLngBounds();
+      path.forEach((p: any) => bounds.extend(p));
+      map.fitBounds(bounds, 32);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  const start = route.points[0];
+  return createPortal(
+    <div className="pin-picker" role="dialog" aria-label={`Route: ${title}`}>
+      <div className="map-header">
+        <span className="map-header-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 12 }}>{title}</span>
+        <button type="button" className="map-close-btn" onClick={onClose}><Icon name="close" size={14} />Close</button>
+      </div>
+      <div className="pin-picker-map">
+        <div ref={ref} className="map-container" style={{ height: "100%" }} />
+        {failed && <div className="map-no-coords">The map couldn't load. Check your connection and try again.</div>}
+      </div>
+      <div className="pin-picker-footer route-viewer-footer">
+        <div className="route-stats">
+          <span><strong>{route.distanceKm} km</strong>distance</span>
+          {route.gainM != null && <span><strong>↑ {route.gainM} m</strong>climb</span>}
+          {route.maxEleM != null && <span><strong>{route.maxEleM} m</strong>highest</span>}
+          <span><strong>{estimateHikeTime(route.distanceKm, route.gainM)}</strong>est. time</span>
+        </div>
+        <ElevationProfile points={route.points} />
+        <div className="route-actions">
+          <a className="route-action-btn" href={`https://www.google.com/maps/dir/?api=1&destination=${start[0]},${start[1]}`} target="_blank" rel="noreferrer"><Icon name="pin" size={15} />Directions to start</a>
+          {route.gpxUrl && <a className="route-action-btn" href={route.gpxUrl} download target="_blank" rel="noreferrer"><Icon name="download" size={15} />Download GPX</a>}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function RouteCard({ tip }: { tip: any }) {
+  const route = tip?.extras?.route;
+  const [open, setOpen] = useState(false);
+  if (!route?.points?.length) return null;
+  const title = splitTipText(tip.text).title || route.name || "Route";
+  return (
+    <>
+      <button type="button" className="route-card" onClick={() => setOpen(true)} aria-label={`Show route on map: ${routeSummary(route)}`}>
+        <RouteSketch points={route.points} />
+        <span className="route-card-text">
+          <span className="route-card-title"><Icon name="route" size={15} />Route</span>
+          <span className="route-card-sub">{routeSummary(route)}</span>
+          <span className="route-card-cta">View on map{route.gpxUrl ? " · GPX" : ""}<Icon name="chevronRight" size={14} /></span>
+        </span>
+      </button>
+      {open && <RouteViewer route={route} title={title} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 // Full-screen map for pinpointing a place search can't find (a trailhead, a mirador, a tiny
 // coffee bar missing from Google/OSM): the pin stays fixed in the middle and the map moves
 // under it -- easier to aim with a thumb than tapping a tiny spot. Satellite view helps for
@@ -2529,6 +2765,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   const [activityType, setActivityType] = useState<string>(e0?.extras?.activityType || "");
   const [difficulty, setDifficulty] = useState<string>(e0?.extras?.difficulty || "");
   const [activityDuration, setActivityDuration] = useState<string>(e0?.extras?.duration || "");
+  const [route, setRoute] = useState<any>(e0?.extras?.route || null);
+  const [routeError, setRouteError] = useState("");
   const [googlePlaceId, setGooglePlaceId] = useState<string>(e0?.extras?.placeId || "");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [visibility, setVisibility] = useState<"public" | "connections">(e0?.visibility === "connections" ? "connections" : "public");
@@ -2677,6 +2915,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     if (category === "activities" && activityType) extras.activityType = activityType;
     if (category === "activities" && difficulty) extras.difficulty = difficulty;
     if (category === "activities" && activityDuration.trim()) extras.duration = activityDuration.trim();
+    if (category === "activities" && route) extras.route = route;
     if (!isRoadTrip && googlePlaceId) extras.placeId = googlePlaceId;
     if (Object.keys(extras).length) newTip.extras = extras;
     if (isRoadTrip) {
@@ -2898,6 +3137,42 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
             <div className="form-group">
               <label className="form-lbl" htmlFor="act-duration">Duration / distance <span className="form-lbl-hint">(optional)</span></label>
               <input id="act-duration" className="form-inp" placeholder="e.g. 2–3 hours, 6 km loop" value={activityDuration} onChange={e => setActivityDuration(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-lbl">Route <span className="form-lbl-hint">(optional, GPX file)</span></label>
+              {route ? (
+                <div className="route-form-preview">
+                  <RouteSketch points={route.points} width={96} height={60} />
+                  <div className="route-card-text">
+                    <span className="route-card-title">{route.name || "Route added"}</span>
+                    <span className="route-card-sub">{routeSummary(route)}</span>
+                  </div>
+                  <button type="button" className="photo-grid-remove route-remove" onClick={() => setRoute(null)} aria-label="Remove route"><Icon name="close" size={14} strokeWidth={2.4} /></button>
+                </div>
+              ) : (
+                <>
+                  <label className="photo-upload-btn">
+                    <Icon name="route" size={16} />Add route (GPX)
+                    <input type="file" style={{ display: "none" }} onChange={async (e: any) => {
+                      const f: File | undefined = e.target.files?.[0];
+                      e.target.value = "";
+                      setRouteError("");
+                      if (!f) return;
+                      if (f.size > 8 * 1024 * 1024) { setRouteError("That file is too big (max 8 MB)."); return; }
+                      const r = buildRouteFromGpx(await f.text());
+                      if (!r) { setRouteError("That doesn't look like a GPX file with a route in it. Export it as GPX and try again."); return; }
+                      setRoute(r);
+                      const start = r.points[0];
+                      if (!placeCoords) { setPlaceCoords({ lat: String(start[0]), lon: String(start[1]) }); setPinnedManually(true); }
+                      if (!activityDuration.trim()) setActivityDuration(routeSummary(r));
+                      if (!place.trim() && r.name) { justPickedRef.current = true; setPlace(r.name); }
+                      if (!activityType) setActivityType("Hike");
+                    }} />
+                  </label>
+                  <div className="maps-hint" style={{ display: "block", lineHeight: 1.5 }}>Strava: on strava.com open the activity or route, then ··· → <strong>Export GPX</strong>. Komoot, AllTrails, Wikiloc and Garmin can all export GPX too.</div>
+                </>
+              )}
+              {routeError && <div className="form-notice" style={{ color: "#B91C1C" }}>{routeError}</div>}
             </div>
           </>
         )}
