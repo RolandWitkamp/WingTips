@@ -250,7 +250,7 @@
         /* z-index above every overlay (map-overlay:400, cat-menu-backdrop:200) -- the FAB pokes
            up 14px above this bar's own top edge via its negative top offset, into the area the
            overlays cover, so without this it got clipped by any open sheet. */
-        .bottom-nav { display:flex; align-items:center; margin:0 12px calc(12px + env(safe-area-inset-bottom, 0px)); padding:6px 4px; background:#FFFFFF; border-radius:32px; box-shadow:var(--shadow-lg); position:sticky; bottom:calc(12px + env(safe-area-inset-bottom, 0px)); z-index:600; }
+        .bottom-nav { display:flex; align-items:center; margin:0 12px calc(12px + env(safe-area-inset-bottom, 0px)); padding:6px 4px; background:#FFFFFF; border-radius:32px; box-shadow:var(--shadow-lg); position:relative; z-index:600; }
         .bnav-item { flex:1; display:flex; flex-direction:column; align-items:center; padding:6px 0; gap:3px; background:none; border:none; cursor:pointer; font-size:11px; font-family:inherit; font-weight:600; color:var(--text2); transition:color 0.15s; }
         .bnav-item.active { color:var(--navy); }
         .bnav-item:hover:not(:disabled) { color:var(--navy); }
@@ -542,6 +542,14 @@ body {
      force the iPhone viewport to zoom out to fit it -- it should clip or wrap instead. */
   overflow-x: hidden;
 }
+
+/* Main app frame: a fixed height (the visible viewport) instead of min-height, so the page itself
+   never scrolls -- only the .screen in the middle does. With min-height the whole document
+   scrolled on Android, which made the sticky bottom nav move along as the address bar
+   collapsed, and sized the Explore sheet (height:85%) against the full page length instead of
+   the visible area, pushing the end of the destination list off-screen and unreachable. */
+.app-frame { height: 100vh; height: 100dvh; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; color: var(--text); max-width: 480px; margin: 0 auto; position: relative; }
+.app-frame > .top-nav, .app-frame > .bottom-nav { flex-shrink: 0; }
 
 .app-shell { min-height: 100vh; max-width: 480px; margin: 0 auto; background: var(--bg); display: flex; flex-direction: column; }
 

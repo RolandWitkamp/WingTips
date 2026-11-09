@@ -13,7 +13,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.25.3";
+const APP_VERSION = "1.25.4";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -1894,6 +1894,8 @@ function DeleteTipButton({ onDelete, label = "Delete" }: { onDelete: () => Promi
   );
 }
 
+const ROLES = ["Captain", "First Officer", "Second Officer", "Senior Purser", "Cabin Crew"];
+
 const DISCIPLINES = [
   { id: "all", label: "All" },
   { id: "cabin", label: "Cabin crew" },
@@ -2258,10 +2260,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
           </div>
           <select className="sf-select" value={filterRole} onChange={e => setFilterRole(e.target.value)}>
             <option value="all">All roles</option>
-            <option value="Captain">Captain</option>
-            <option value="First Officer">First Officer</option>
-            <option value="Senior Purser">Senior Purser</option>
-            <option value="Cabin Crew">Cabin Crew</option>
+            {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div className="sort-filter-bar crew-filter-bar">
@@ -3450,10 +3449,7 @@ function ProfileSetupScreen({ profile, email, updateProfile }: { profile: any; e
           <input id="setup-name" className="auth-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Maria Jansen" autoComplete="name" />
           <label className="pef-label" htmlFor="setup-role">Role</label>
           <select id="setup-role" className="auth-input" value={role} onChange={e => setRole(e.target.value)}>
-            <option>Captain</option>
-            <option>First Officer</option>
-            <option>Senior Purser</option>
-            <option>Cabin Crew</option>
+            {ROLES.map(r => <option key={r}>{r}</option>)}
           </select>
           <label className="pef-label" htmlFor="setup-base">Home base</label>
           <select id="setup-base" className="auth-input" value={base} onChange={e => setBase(e.target.value)}>
@@ -3596,10 +3592,7 @@ function ProfileScreen({ onBack, connections, addedTips, profile, updateProfile,
           <div className="pef-field">
             <label className="pef-label">Role</label>
             <select className="pef-input" value={draft.role} onChange={(e: any) => setDraft((p: any) => ({ ...p, role: e.target.value }))}>
-              <option>Captain</option>
-              <option>First Officer</option>
-              <option>Senior Purser</option>
-              <option>Cabin Crew</option>
+              {ROLES.map(r => <option key={r}>{r}</option>)}
             </select>
           </div>
           <div className="pef-field">
@@ -4424,7 +4417,7 @@ function AppContent() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", flexDirection: "column", color: "var(--text)", maxWidth: 480, margin: "0 auto", position: "relative" }}>
+    <div className="app-frame">
       {/* TOP NAV */}
       <div className="top-nav" ref={topNavRef}>
         <button className="nav-title" onClick={() => { setScreen("home"); setShowCatMenu(false); setShowDestMenu(false); }}>Wing<span>Tips</span></button>
