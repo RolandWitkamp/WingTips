@@ -14,7 +14,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.25.6";
+const APP_VERSION = "1.25.7";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -334,7 +334,45 @@ function splitTipText(text: string): { title: string; body: string } {
   return i < 0 ? { title: rest.trim(), body: "" } : { title: rest.slice(0, i).trim(), body: rest.slice(i + 1).trim() };
 }
 const NIGHTLIFE_TYPES = ["Bar", "Rooftop bar", "Pub", "Nightclub", "Live music", "Shows & theatre", "Karaoke"];
-const ACTIVITY_TYPES = ["Hike", "Viewpoint", "Waterfall", "Beach & water", "Wildlife & nature", "Sightseeing", "Adventure", "Tour & excursion"];
+// Outdoor & Activities: Strava's outdoor sport types (indoor ones like yoga or weight training
+// belong under Fitness), grouped so the form and filters stay short, plus layover sights that
+// aren't a sport. Names already used on tips ("Hike", "Viewpoint", ...) are kept as they were.
+// pace: km/h on the flat and metres of climb per extra hour, for estimating a planned route.
+const ACTIVITY_GROUPS: { id: string; label: string; types: string[]; pace?: { kmh: number; climbPerH: number } }[] = [
+  { id: "foot", label: "On foot", types: ["Hike", "Walk", "Run", "Trail Run"], pace: { kmh: 4.5, climbPerH: 600 } },
+  { id: "cycling", label: "Cycling", types: ["Ride", "Mountain Bike Ride", "Gravel Ride", "E-Bike Ride", "E-Mountain Bike Ride", "Handcycle", "Velomobile"], pace: { kmh: 18, climbPerH: 900 } },
+  { id: "water", label: "Water", types: ["Swim", "Surfing", "Kitesurf", "Windsurf", "Stand Up Paddling", "Kayaking", "Canoeing", "Rowing", "Sail", "Beach & water"] },
+  { id: "winter", label: "Winter", types: ["Alpine Ski", "Backcountry Ski", "Nordic Ski", "Snowboard", "Snowshoe", "Ice Skate"] },
+  { id: "sports", label: "Other sports", types: ["Rock Climbing", "Inline Skate", "Skateboard", "Roller Ski", "Wheelchair", "Golf", "Tennis", "Padel", "Pickleball", "Badminton", "Squash", "Table Tennis", "Soccer"] },
+  { id: "sights", label: "Sights & nature", types: ["Viewpoint", "Waterfall", "Wildlife & nature", "Sightseeing", "Adventure", "Tour & excursion"] },
+];
+const TYPE_PACE: Record<string, { kmh: number; climbPerH: number }> = {
+  "Run": { kmh: 9, climbPerH: 1000 }, "Trail Run": { kmh: 7, climbPerH: 800 }, "Walk": { kmh: 4.8, climbPerH: 600 },
+  "Mountain Bike Ride": { kmh: 12, climbPerH: 700 }, "Gravel Ride": { kmh: 16, climbPerH: 800 },
+  "E-Bike Ride": { kmh: 22, climbPerH: 1500 }, "E-Mountain Bike Ride": { kmh: 15, climbPerH: 1200 },
+};
+function activityGroupOf(type?: string) { return ACTIVITY_GROUPS.find(g => type && g.types.includes(type)); }
+function activityPace(type?: string) { return (type && TYPE_PACE[type]) || activityGroupOf(type)?.pace || (type ? undefined : ACTIVITY_GROUPS[0].pace); }
+// Strava writes the sport into the GPX (<type>cycling</type>, <type>mountain_biking</type>, ...),
+// and its default activity names say it too ("Morning Ride", "Lunch Hike") -- match either.
+const GPX_TYPE_RULES: [RegExp, string][] = [
+  [/emountain|emtb/, "E-Mountain Bike Ride"], [/mountain|mtb/, "Mountain Bike Ride"], [/gravel/, "Gravel Ride"],
+  [/ebik|ebike|eride/, "E-Bike Ride"], [/trailrun/, "Trail Run"], [/handcycl/, "Handcycle"], [/velomobile/, "Velomobile"],
+  [/cycl|bik|ride/, "Ride"], [/run/, "Run"], [/hik/, "Hike"], [/walk/, "Walk"], [/swim/, "Swim"],
+  [/backcountry/, "Backcountry Ski"], [/nordic|crosscountry/, "Nordic Ski"], [/alpine|downhill|ski/, "Alpine Ski"],
+  [/snowboard/, "Snowboard"], [/snowshoe/, "Snowshoe"], [/iceskat/, "Ice Skate"], [/kayak/, "Kayaking"], [/canoe/, "Canoeing"],
+  [/standuppaddl|^sup$|paddleboard/, "Stand Up Paddling"], [/kite/, "Kitesurf"], [/windsurf/, "Windsurf"], [/surf/, "Surfing"],
+  [/row/, "Rowing"], [/sail/, "Sail"], [/inline|rollerblad/, "Inline Skate"], [/rollerski/, "Roller Ski"], [/skateboard/, "Skateboard"],
+  [/climb/, "Rock Climbing"], [/wheelchair/, "Wheelchair"], [/golf/, "Golf"],
+];
+function detectActivityType(...hints: string[]): string {
+  for (const h of hints) {
+    const t = (h || "").toLowerCase().replace(/[^a-z]/g, "");
+    if (!t || /virtual/.test(t)) continue;
+    for (const [re, type] of GPX_TYPE_RULES) if (re.test(t)) return type;
+  }
+  return "";
+}
 const ACTIVITY_LEVELS = ["Easy", "Moderate", "Challenging"];
 function ExtrasBadges({ tip }: { tip: any }) {
   const x = tip?.extras;
@@ -348,6 +386,7 @@ function ExtrasBadges({ tip }: { tip: any }) {
       {tip.category === "activities" && x.activityType && <span className="tip-extra-badge"><CategoryIcon id="activities" size={13} color="currentColor" />{x.activityType}</span>}
       {tip.category === "activities" && x.difficulty && <span className="tip-extra-badge">{x.difficulty}</span>}
       {tip.category === "activities" && x.duration && <span className="tip-extra-badge"><Icon name="clock" size={13} />{x.duration}</span>}
+      {tip.category === "activities" && x.rental && <span className="tip-extra-badge"><Icon name="tag" size={13} />Rental: {x.rental}</span>}
     </>
   );
 }
@@ -1070,7 +1109,7 @@ async function uploadTipPhotos(photos: string[] | undefined, userId: string): Pr
   return out;
 }
 
-// Route files (GPX) for Hikes & Activities: the simplified track lives in extras.route so it
+// Route files (GPX) for Outdoor & Activities: the simplified track lives in extras.route so it
 // loads with the tip; the original file goes to the public "tip-routes" bucket so crew can
 // download it into Strava/Komoot/their watch. The raw text rides along in extras.route.gpxText
 // only until this uploads it -- if the upload fails (e.g. the bucket isn't set up yet) the
@@ -1595,7 +1634,7 @@ const CATEGORIES = [
   { id: "nightlife",     label: "Nightlife",       color: "#6366F1" },
   { id: "accommodation", label: "Accommodation",   color: "#0EA5E9" },
   { id: "working",       label: "Working",         color: "#64748B" },
-  { id: "activities",    label: "Hikes & Activities", color: "#047857" },
+  { id: "activities",    label: "Outdoor & Activities", color: "#047857" },
   { id: "roadtrip",      label: "Trips & Tours",   color: "#F59E0B" },
   { id: "other",         label: "Other",           color: "#78716C" },
 ];
@@ -2126,7 +2165,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
     .filter(t => !filterGem || t.extras?.hiddenGem)
     .filter(t => !filterClasses || t.extras?.classes === true)
     .filter(t => !filterNight || t.extras?.nightlifeType === filterNight)
-    .filter(t => !filterActivity || t.extras?.activityType === filterActivity)
+    .filter(t => !filterActivity || activityGroupOf(t.extras?.activityType)?.id === filterActivity)
     .slice()
     .sort((a, b) => sortBy === "liked"
       ? b.likes - a.likes
@@ -2318,8 +2357,8 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
         <div className="sort-filter-bar crew-filter-bar">
           <button className={`sf-btn${filterGem ? " active" : ""}`} onClick={() => setFilterGem(v => !v)}><CategoryIcon id="gems" size={14} color="currentColor" />Hidden gems</button>
           {activeCategory === "fitness" && <button className={`sf-btn${filterClasses ? " active" : ""}`} onClick={() => setFilterClasses(v => !v)}><Icon name="users" size={14} />Classes</button>}
-          {activeCategory === "activities" && ACTIVITY_TYPES.map(t => (
-            <button key={t} className={`sf-btn${filterActivity === t ? " active" : ""}`} onClick={() => setFilterActivity(v => v === t ? "" : t)}>{t}</button>
+          {activeCategory === "activities" && ACTIVITY_GROUPS.map(g => (
+            <button key={g.id} className={`sf-btn${filterActivity === g.id ? " active" : ""}`} onClick={() => setFilterActivity(v => v === g.id ? "" : g.id)}>{g.label}</button>
           ))}
           {activeCategory === "nightlife" && NIGHTLIFE_TYPES.map(t => (
             <button key={t} className={`sf-btn${filterNight === t ? " active" : ""}`} onClick={() => setFilterNight(v => v === t ? "" : t)}>{t}</button>
@@ -2462,16 +2501,19 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
 // Parsed in the browser (DOMParser, no library). Strava exports activities and routes as GPX
 // with <trkpt lat lon><ele>; <rtept> (planned routes from other apps) is read too.
 type RoutePoint = [number, number, number?]; // lat, lng, elevation (m)
-function parseGpx(text: string): { points: RoutePoint[]; name: string } | null {
+function parseGpx(text: string): { points: RoutePoint[]; times: (number | null)[]; name: string; type: string } | null {
   try {
     const doc = new DOMParser().parseFromString(text, "application/xml");
     if (doc.getElementsByTagName("parsererror").length) return null;
     let nodes = Array.from(doc.getElementsByTagNameNS("*", "trkpt"));
     if (!nodes.length) nodes = Array.from(doc.getElementsByTagNameNS("*", "rtept"));
     const points: RoutePoint[] = [];
+    const times: (number | null)[] = [];
     for (const n of nodes) {
       const lat = parseFloat(n.getAttribute("lat") || ""), lng = parseFloat(n.getAttribute("lon") || "");
       if (!isFinite(lat) || !isFinite(lng)) continue;
+      const tm = Date.parse(n.getElementsByTagNameNS("*", "time")[0]?.textContent || "");
+      times.push(isFinite(tm) ? tm : null);
       const eleTxt = n.getElementsByTagNameNS("*", "ele")[0]?.textContent;
       const ele = eleTxt != null ? parseFloat(eleTxt) : NaN;
       points.push(isFinite(ele) ? [lat, lng, ele] : [lat, lng]);
@@ -2479,7 +2521,8 @@ function parseGpx(text: string): { points: RoutePoint[]; name: string } | null {
     if (points.length < 2) return null;
     const nameNode = doc.getElementsByTagNameNS("*", "trk")[0]?.getElementsByTagNameNS("*", "name")[0]
       || doc.getElementsByTagNameNS("*", "rte")[0]?.getElementsByTagNameNS("*", "name")[0];
-    return { points, name: (nameNode?.textContent || "").trim() };
+    const typeNode = doc.getElementsByTagNameNS("*", "trk")[0]?.getElementsByTagNameNS("*", "type")[0];
+    return { points, times, name: (nameNode?.textContent || "").trim(), type: (typeNode?.textContent || "").trim() };
   } catch { return null; }
 }
 function segMeters(a: RoutePoint, b: RoutePoint): number {
@@ -2533,26 +2576,68 @@ function simplifyRoute(points: RoutePoint[], maxPoints = 500): RoutePoint[] {
   while (out.length > maxPoints) { tol *= 1.6; out = run(tol); }
   return out;
 }
-// Naismith's rule, a bit gentler for mixed crew fitness: 4.5 km/h plus 1 h per 600 m of climb.
-function estimateHikeTime(distanceKm: number, gainM?: number): string {
-  const h = distanceKm / 4.5 + (gainM || 0) / 600;
+// A recorded activity (not a planned route) carries a timestamp per point. Elapsed is first to
+// last; moving time only counts stretches of 15 s+ covered at 0.3 m/s or more, so breaks and GPS
+// jitter while standing still drop out -- close to, though not exactly, Strava's own figure.
+// Speed is measured start-to-end of each stretch, not along every point: summing point-to-point
+// hops while standing still adds up GPS wander and made a café stop count as moving.
+function routeTiming(points: RoutePoint[], times: (number | null)[]): { elapsedS: number; movingS: number } | null {
+  const idx = times.map((t, i) => (t != null ? i : -1)).filter(i => i >= 0);
+  if (idx.length < points.length * 0.5 || idx.length < 2) return null;
+  const elapsedS = Math.round(((times[idx[idx.length - 1]] as number) - (times[idx[0]] as number)) / 1000);
+  if (elapsedS < 60) return null;
+  let movingS = 0, a = idx[0];
+  for (let k = 1; k < idx.length; k++) {
+    const i = idx[k];
+    const dt = ((times[i] as number) - (times[a] as number)) / 1000;
+    if (dt < 15 && k < idx.length - 1) continue;
+    if (dt > 0 && segMeters(points[a], points[i]) / dt >= 0.3) movingS += dt;
+    a = i;
+  }
+  return { elapsedS, movingS: Math.round(Math.min(movingS, elapsedS)) };
+}
+function fmtDuration(sec: number): string {
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`;
+}
+// Planned routes have no times: estimate from the sport's pace (Naismith-style for hiking:
+// 4.5 km/h plus an hour per 600 m of climb). Sports without a sensible pace get no estimate.
+function estimateRouteTime(distanceKm: number, gainM: number | undefined, type?: string): string {
+  const pace = activityPace(type);
+  if (!pace) return "";
+  const h = distanceKm / pace.kmh + (gainM || 0) / pace.climbPerH;
   if (h < 0.75) return `~${Math.max(10, Math.round(h * 60 / 5) * 5)} min`;
   const half = Math.round(h * 2) / 2;
   return `~${half % 1 ? `${Math.floor(half)}½` : half} h`;
 }
-function routeSummary(r: any): string {
-  return [`${r.distanceKm} km`, r.gainM != null ? `↑ ${r.gainM} m` : "", estimateHikeTime(r.distanceKm, r.gainM)].filter(Boolean).join(" · ");
+function routeTimeLabel(r: any, type?: string): string {
+  return r.movingS ? fmtDuration(r.movingS) : estimateRouteTime(r.distanceKm, r.gainM, type);
+}
+function routeSummary(r: any, type?: string): string {
+  return [`${r.distanceKm} km`, r.gainM ? `↑ ${r.gainM} m` : "", routeTimeLabel(r, type)].filter(Boolean).join(" · ");
+}
+// Average speed for wheels, pace per km for running/walking -- how each sport talks about it.
+function routeSpeedLabel(r: any, type?: string): { value: string; label: string } | null {
+  if (!r.movingS || !r.distanceKm) return null;
+  const g = activityGroupOf(type)?.id;
+  if (g === "foot") {
+    const secPerKm = r.movingS / r.distanceKm;
+    return { value: `${Math.floor(secPerKm / 60)}:${String(Math.round(secPerKm % 60)).padStart(2, "0")} /km`, label: "avg pace" };
+  }
+  return { value: `${(r.distanceKm / (r.movingS / 3600)).toFixed(1)} km/h`, label: "avg speed" };
 }
 function buildRouteFromGpx(text: string) {
   const parsed = parseGpx(text);
   if (!parsed) return null;
   const stats = routeStats(parsed.points);
+  const timing = routeTiming(parsed.points, parsed.times);
   const pts = simplifyRoute(parsed.points).map(p => {
     const q: RoutePoint = [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5];
     if (p[2] != null) q.push(Math.round(p[2]));
     return q;
   });
-  return { name: parsed.name, points: pts, ...stats, gpxText: text };
+  return { name: parsed.name, points: pts, ...stats, ...(timing || {}), detectedType: detectActivityType(parsed.type, parsed.name), gpxText: text };
 }
 
 // Small line drawing of the track for the tip card -- plain SVG, no map load or API cost.
@@ -2596,7 +2681,7 @@ function ElevationProfile({ points }: { points: RoutePoint[] }) {
   );
 }
 
-function RouteViewer({ route, title, onClose }: { route: any; title: string; onClose: () => void }) {
+function RouteViewer({ route, title, type, onClose }: { route: any; title: string; type?: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -2637,7 +2722,10 @@ function RouteViewer({ route, title, onClose }: { route: any; title: string; onC
           <span><strong>{route.distanceKm} km</strong>distance</span>
           {route.gainM != null && <span><strong>↑ {route.gainM} m</strong>climb</span>}
           {route.maxEleM != null && <span><strong>{route.maxEleM} m</strong>highest</span>}
-          <span><strong>{estimateHikeTime(route.distanceKm, route.gainM)}</strong>est. time</span>
+          {route.movingS
+            ? <span><strong>{fmtDuration(route.movingS)}</strong>moving{route.elapsedS && route.elapsedS - route.movingS >= 300 ? ` · ${fmtDuration(route.elapsedS)} total` : ""}</span>
+            : routeTimeLabel(route, type) && <span><strong>{routeTimeLabel(route, type)}</strong>est. time</span>}
+          {(() => { const sp = routeSpeedLabel(route, type); return sp && <span><strong>{sp.value}</strong>{sp.label}</span>; })()}
         </div>
         <ElevationProfile points={route.points} />
         <div className="route-actions">
@@ -2655,17 +2743,18 @@ function RouteCard({ tip }: { tip: any }) {
   const [open, setOpen] = useState(false);
   if (!route?.points?.length) return null;
   const title = splitTipText(tip.text).title || route.name || "Route";
+  const type = tip.extras?.activityType;
   return (
     <>
-      <button type="button" className="route-card" onClick={() => setOpen(true)} aria-label={`Show route on map: ${routeSummary(route)}`}>
+      <button type="button" className="route-card" onClick={() => setOpen(true)} aria-label={`Show route on map: ${routeSummary(route, type)}`}>
         <RouteSketch points={route.points} />
         <span className="route-card-text">
           <span className="route-card-title"><Icon name="route" size={15} />Route</span>
-          <span className="route-card-sub">{routeSummary(route)}</span>
+          <span className="route-card-sub">{routeSummary(route, type)}</span>
           <span className="route-card-cta">View on map{route.gpxUrl ? " · GPX" : ""}<Icon name="chevronRight" size={14} /></span>
         </span>
       </button>
-      {open && <RouteViewer route={route} title={title} onClose={() => setOpen(false)} />}
+      {open && <RouteViewer route={route} title={title} type={type} onClose={() => setOpen(false)} />}
     </>
   );
 }
@@ -2765,6 +2854,10 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   const [activityType, setActivityType] = useState<string>(e0?.extras?.activityType || "");
   const [difficulty, setDifficulty] = useState<string>(e0?.extras?.difficulty || "");
   const [activityDuration, setActivityDuration] = useState<string>(e0?.extras?.duration || "");
+  const [activityGroup, setActivityGroup] = useState<string>(activityGroupOf(e0?.extras?.activityType)?.id || "");
+  const [rental, setRental] = useState<string>(e0?.extras?.rental || "");
+  // Picking a type (or importing a GPX that names one) opens its group.
+  useEffect(() => { const g = activityGroupOf(activityType); if (g) setActivityGroup(g.id); }, [activityType]);
   const [route, setRoute] = useState<any>(e0?.extras?.route || null);
   const [routeError, setRouteError] = useState("");
   const [googlePlaceId, setGooglePlaceId] = useState<string>(e0?.extras?.placeId || "");
@@ -2915,7 +3008,8 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     if (category === "activities" && activityType) extras.activityType = activityType;
     if (category === "activities" && difficulty) extras.difficulty = difficulty;
     if (category === "activities" && activityDuration.trim()) extras.duration = activityDuration.trim();
-    if (category === "activities" && route) extras.route = route;
+    if (category === "activities" && route) { const { detectedType, ...r } = route; extras.route = r; }
+    if (category === "activities" && rental.trim() && ["cycling", "water", "winter"].includes(activityGroup)) extras.rental = rental.trim();
     if (!isRoadTrip && googlePlaceId) extras.placeId = googlePlaceId;
     if (Object.keys(extras).length) newTip.extras = extras;
     if (isRoadTrip) {
@@ -3121,11 +3215,24 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
             <div className="form-group">
               <label className="form-lbl">What kind of activity? <span className="form-lbl-hint">(optional)</span></label>
               <div className="price-chip-row">
-                {ACTIVITY_TYPES.map(t => (
-                  <button key={t} type="button" className={`price-chip${activityType === t ? " active" : ""}`} onClick={() => setActivityType(v => v === t ? "" : t)}>{t}</button>
+                {ACTIVITY_GROUPS.map(g => (
+                  <button key={g.id} type="button" className={`price-chip${activityGroup === g.id ? " active" : ""}`} onClick={() => setActivityGroup(v => v === g.id ? "" : g.id)}>{g.label}</button>
                 ))}
               </div>
+              {activityGroup && (
+                <div className="price-chip-row activity-type-row">
+                  {ACTIVITY_GROUPS.find(g => g.id === activityGroup)!.types.map(t => (
+                    <button key={t} type="button" className={`price-chip${activityType === t ? " active" : ""}`} onClick={() => setActivityType(v => v === t ? "" : t)}>{t}</button>
+                  ))}
+                </div>
+              )}
             </div>
+            {["cycling", "water", "winter"].includes(activityGroup) && (
+              <div className="form-group">
+                <label className="form-lbl" htmlFor="act-rental">Rental <span className="form-lbl-hint">(optional: where to rent gear, price)</span></label>
+                <input id="act-rental" className="form-inp" placeholder={activityGroup === "cycling" ? "e.g. Bike shop next to the hotel, €15 a day" : "e.g. Board rental on the beach, $20 an hour"} value={rental} onChange={e => setRental(e.target.value)} />
+              </div>
+            )}
             <div className="form-group">
               <label className="form-lbl">Difficulty <span className="form-lbl-hint">(optional)</span></label>
               <div className="price-chip-row">
@@ -3145,7 +3252,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
                   <RouteSketch points={route.points} width={96} height={60} />
                   <div className="route-card-text">
                     <span className="route-card-title">{route.name || "Route added"}</span>
-                    <span className="route-card-sub">{routeSummary(route)}</span>
+                    <span className="route-card-sub">{routeSummary(route, activityType)}</span>
                   </div>
                   <button type="button" className="photo-grid-remove route-remove" onClick={() => setRoute(null)} aria-label="Remove route"><Icon name="close" size={14} strokeWidth={2.4} /></button>
                 </div>
@@ -3164,9 +3271,10 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
                       setRoute(r);
                       const start = r.points[0];
                       if (!placeCoords) { setPlaceCoords({ lat: String(start[0]), lon: String(start[1]) }); setPinnedManually(true); }
-                      if (!activityDuration.trim()) setActivityDuration(routeSummary(r));
+                      const type = activityType || r.detectedType || ACTIVITY_GROUPS.find(g => g.id === activityGroup)?.types[0] || "Hike";
+                      if (!activityType) setActivityType(type);
+                      if (!activityDuration.trim()) setActivityDuration(routeSummary(r, type));
                       if (!place.trim() && r.name) { justPickedRef.current = true; setPlace(r.name); }
-                      if (!activityType) setActivityType("Hike");
                     }} />
                   </label>
                   <div className="maps-hint" style={{ display: "block", lineHeight: 1.5 }}>Strava: on strava.com open the activity or route, then ··· → <strong>Export GPX</strong>. Komoot, AllTrails, Wikiloc and Garmin can all export GPX too.</div>
@@ -4357,7 +4465,7 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
     .filter(r => !filterGem || r.tip.extras?.hiddenGem)
     .filter(r => !filterClasses || r.tip.extras?.classes === true)
     .filter(r => !filterNight || r.tip.extras?.nightlifeType === filterNight)
-    .filter(r => !filterActivity || r.tip.extras?.activityType === filterActivity);
+    .filter(r => !filterActivity || activityGroupOf(r.tip.extras?.activityType)?.id === filterActivity);
 
   return (
     <div className="screen">
@@ -4370,8 +4478,8 @@ function CategoryFeedScreen({ category, addedTips, onBack, onDestClick, onTipCli
         <div className="sort-filter-bar crew-filter-bar">
           <button className={`sf-btn${filterGem ? " active" : ""}`} onClick={() => setFilterGem(v => !v)}><CategoryIcon id="gems" size={14} color="currentColor" />Hidden gems</button>
           {category === "fitness" && <button className={`sf-btn${filterClasses ? " active" : ""}`} onClick={() => setFilterClasses(v => !v)}><Icon name="users" size={14} />Classes</button>}
-          {category === "activities" && ACTIVITY_TYPES.map(t => (
-            <button key={t} className={`sf-btn${filterActivity === t ? " active" : ""}`} onClick={() => setFilterActivity(v => v === t ? "" : t)}>{t}</button>
+          {category === "activities" && ACTIVITY_GROUPS.map(g => (
+            <button key={g.id} className={`sf-btn${filterActivity === g.id ? " active" : ""}`} onClick={() => setFilterActivity(v => v === g.id ? "" : g.id)}>{g.label}</button>
           ))}
           {category === "nightlife" && NIGHTLIFE_TYPES.map(t => (
             <button key={t} className={`sf-btn${filterNight === t ? " active" : ""}`} onClick={() => setFilterNight(v => v === t ? "" : t)}>{t}</button>
