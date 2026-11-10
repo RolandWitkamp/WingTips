@@ -47,7 +47,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.26.0";
+const APP_VERSION = "1.26.1";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -1875,6 +1875,13 @@ function HomeScreen({ onSearch, onDestClick, onTipClick, addedTips, recentDests 
           </div>
         </div>
       )}
+      <div className="section-block">
+        <FeedbackButton className="home-feedback-card">
+          <Icon name="comment" size={20} />
+          <span><strong>Ideas or found a bug?</strong><br />Send feedback to the maker of WingTips</span>
+          <Icon name="chevronRight" size={16} />
+        </FeedbackButton>
+      </div>
     </div>
   );
 }
@@ -4073,6 +4080,153 @@ function ProfileSetupScreen({ profile, email, updateProfile }: { profile: any; e
   );
 }
 
+// ─── FEEDBACK ──────────────────────────────────────────────────────────────────
+// Crew send feedback from Home or their account page; it lands in the `feedback` table, which
+// only the owner's account can read (same single-owner e-mail check as the signup log). The
+// sender's e-mail is filled in by the database from their login, so a reply is one tap away.
+const FEEDBACK_KINDS = [
+  { id: "idea", label: "Idea" },
+  { id: "bug", label: "Something's broken" },
+  { id: "question", label: "Question" },
+  { id: "other", label: "Other" },
+];
+function feedbackPlatform(): string {
+  const ua = navigator.userAgent;
+  const device = /android/i.test(ua) ? "Android" : /iphone|ipad|ipod/i.test(ua) ? "iPhone/iPad" : "Desktop";
+  const standalone = window.matchMedia?.("(display-mode: standalone)").matches || (navigator as any).standalone;
+  return `${device} · ${IS_NATIVE ? "app" : standalone ? "home-screen web app" : "browser"}`;
+}
+
+function FeedbackSheet({ onClose }: { onClose: () => void }) {
+  const [kind, setKind] = useState("idea");
+  const [message, setMessage] = useState("");
+  const [state, setState] = useState<"" | "sending" | "sent" | "error">("");
+  useBackClose(true, onClose);
+  async function send() {
+    if (!message.trim() || state === "sending") return;
+    setState("sending");
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from("feedback").insert({
+      user_id: user?.id, kind, message: message.trim().slice(0, 4000), app_version: APP_VERSION, platform: feedbackPlatform(),
+    });
+    setState(error ? "error" : "sent");
+  }
+  return createPortal(
+    <div className="cat-menu-backdrop feedback-backdrop" onClick={onClose}>
+      <div className="cat-menu-sheet feedback-sheet" onClick={e => e.stopPropagation()} role="dialog" aria-label="Send feedback">
+        <div className="cat-menu-handle" />
+        {state === "sent" ? (
+          <div className="feedback-done">
+            <Icon name="checkCircle" size={44} color="#059669" strokeWidth={1.6} />
+            <div className="cat-menu-title" style={{ padding: 0 }}>Thanks!</div>
+            <div className="toggle-sub">Your feedback went straight to the maker of WingTips.</div>
+            <button type="button" className="auth-btn" style={{ width: "100%" }} onClick={onClose}>Close</button>
+          </div>
+        ) : (
+          <div className="feedback-body">
+            <div className="cat-menu-title" style={{ padding: 0 }}>Send feedback</div>
+            <div className="toggle-sub">Ideas, bugs, questions: everything helps make WingTips better.</div>
+            <div className="price-chip-row">
+              {FEEDBACK_KINDS.map(k => (
+                <button key={k.id} type="button" className={`price-chip${kind === k.id ? " active" : ""}`} onClick={() => setKind(k.id)}>{k.label}</button>
+              ))}
+            </div>
+            <textarea className="form-inp feedback-text" rows={5} maxLength={4000} value={message} onChange={e => setMessage(e.target.value)}
+              placeholder={kind === "bug" ? "What happened, and what did you expect? Which screen were you on?" : "Tell me what's on your mind…"} />
+            {state === "error" && <div className="auth-error">Couldn't send it. Check your connection and try again.</div>}
+            <button type="button" className="auth-btn" onClick={send} disabled={!message.trim() || state === "sending"}>{state === "sending" ? "Sending…" : "Send feedback"}</button>
+            <div className="maps-hint" style={{ display: "block" }}>Sent with your name, e-mail and app version ({APP_VERSION}), so I can get back to you.</div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function FeedbackInbox({ onClose }: { onClose: () => void }) {
+  const [items, setItems] = useState<any[] | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [showHandled, setShowHandled] = useState(false);
+  useBackClose(true, onClose);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("feedback").select("*").order("created_at", { ascending: false }).limit(200);
+      setItems(data || []);
+      const ids = [...new Set((data || []).map((f: any) => f.user_id).filter(Boolean))];
+      if (ids.length) {
+        const { data: profs } = await supabase.from("profiles").select("id, name, role").in("id", ids);
+        setNames(Object.fromEntries((profs || []).map((p: any) => [p.id, [p.name, p.role].filter(Boolean).join(", ")])));
+      }
+    })();
+  }, []);
+  async function toggleHandled(f: any) {
+    const handled = !f.handled;
+    setItems(list => (list || []).map(x => x.id === f.id ? { ...x, handled } : x));
+    const { error } = await supabase.from("feedback").update({ handled }).eq("id", f.id);
+    if (error) setItems(list => (list || []).map(x => x.id === f.id ? { ...x, handled: !handled } : x));
+  }
+  const shown = (items || []).filter(f => showHandled || !f.handled);
+  const kindLabel = (k: string) => FEEDBACK_KINDS.find(x => x.id === k)?.label || k;
+  return createPortal(
+    <div className="pin-picker" role="dialog" aria-label="Feedback inbox">
+      <div className="map-header">
+        <span className="map-header-title">Feedback</span>
+        <button type="button" className="map-close-btn" onClick={onClose}><Icon name="close" size={14} />Close</button>
+      </div>
+      <div className="feedback-inbox">
+        <label className="feedback-inbox-toggle"><input type="checkbox" checked={showHandled} onChange={e => setShowHandled(e.target.checked)} /> Show handled</label>
+        {items === null && <div className="no-tips"><Icon name="loader" size={20} className="spin" /></div>}
+        {items && shown.length === 0 && <div className="no-tips">{items.length ? "All feedback handled." : "No feedback yet."}</div>}
+        {shown.map(f => (
+          <div key={f.id} className={`feedback-item${f.handled ? " handled" : ""}`}>
+            <div className="feedback-item-head">
+              <span className={`feedback-kind kind-${f.kind}`}>{kindLabel(f.kind)}</span>
+              <span className="feedback-date">{new Date(f.created_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+            <div className="feedback-msg">{f.message}</div>
+            <div className="feedback-meta">{names[f.user_id] || "Crew member"}{f.email ? ` · ${f.email}` : ""}<br />v{f.app_version || "?"} · {f.platform || "?"}</div>
+            <div className="feedback-actions">
+              {f.email && <a className="route-action-btn" href={`mailto:${f.email}?subject=${encodeURIComponent("Your WingTips feedback")}&body=${encodeURIComponent(`\n\n---\nYou wrote:\n${f.message}`)}`}><Icon name="mail" size={15} />Reply</a>}
+              <button type="button" className="route-action-btn" onClick={() => toggleHandled(f)}><Icon name="check" size={15} />{f.handled ? "Mark as open" : "Mark handled"}</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function FeedbackInboxButton() {
+  const [open, setOpen] = useState(false);
+  const [openCount, setOpenCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (open) return;
+    supabase.from("feedback").select("id", { count: "exact", head: true }).eq("handled", false).then(({ count }) => setOpenCount(count ?? 0));
+  }, [open]);
+  return (
+    <>
+      <button type="button" className="account-about-btn" onClick={() => setOpen(true)}>
+        <Icon name="mail" size={18} />Feedback inbox{openCount ? <span className="more-options-count" style={{ marginLeft: 6 }}>{openCount} open</span> : null}<Icon name="chevronRight" size={16} className="account-about-chevron" />
+      </button>
+      {open && <FeedbackInbox onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function FeedbackButton({ className = "account-about-btn", children }: { className?: string; children?: any }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className={className} onClick={() => setOpen(true)}>
+        {children || <><Icon name="comment" size={18} />Send feedback<Icon name="chevronRight" size={16} className="account-about-chevron" /></>}
+      </button>
+      {open && <FeedbackSheet onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 function AccountSection() {
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -4117,6 +4271,8 @@ function AccountSection() {
       <button type="button" className="account-about-btn" onClick={() => { try { localStorage.removeItem(INTRO_SEEN_KEY); } catch {} location.reload(); }}>
         <Icon name="sparkle" size={18} />How WingTips works<Icon name="chevronRight" size={16} className="account-about-chevron" />
       </button>
+      <FeedbackButton />
+      {email.toLowerCase() === ADMIN_EMAIL && <FeedbackInboxButton />}
 
       <div className="account-block">
         <div className="account-block-title">Change password</div>

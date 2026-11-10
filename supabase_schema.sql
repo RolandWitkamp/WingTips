@@ -355,3 +355,29 @@ as $$
 $$;
 revoke all on function public.search_crew(text) from public, anon;
 grant execute on function public.search_crew(text) to authenticated;
+
+
+-- Feedback from crew (Send feedback on Home / account page). Anyone signed in can send; only the
+-- owner's account can read, mark handled or delete it. The e-mail is taken from the login, not
+-- from what the app sends, so it can't be faked; removed with the account (on delete cascade).
+create table if not exists feedback (
+  id bigint generated always as identity primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  email text default (auth.jwt()->>'email'),
+  kind text not null default 'other',
+  message text not null check (char_length(message) between 1 and 4000),
+  app_version text,
+  platform text,
+  handled boolean not null default false,
+  created_at timestamptz not null default now()
+);
+alter table feedback enable row level security;
+drop policy if exists "feedback_insert_own" on feedback;
+create policy "feedback_insert_own" on feedback for insert to authenticated
+  with check (user_id = auth.uid() and (email is null or lower(email) = lower(auth.jwt()->>'email')));
+drop policy if exists "feedback_select_owner" on feedback;
+create policy "feedback_select_owner" on feedback for select using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');
+drop policy if exists "feedback_update_owner" on feedback;
+create policy "feedback_update_owner" on feedback for update using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');
+drop policy if exists "feedback_delete_owner" on feedback;
+create policy "feedback_delete_owner" on feedback for delete using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');
