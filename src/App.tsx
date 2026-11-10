@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
+import { Capacitor } from "@capacitor/core";
+import { App as CapApp } from "@capacitor/app";
 
 const supabase = createClient(
   "https://sgdqckahseaebayuapgo.supabase.co",
@@ -8,13 +10,44 @@ const supabase = createClient(
 );
 // Captured once, before Supabase processes/clears the URL hash, so a password-reset link's
 // flow type survives even though it just looks like landing in a normal session otherwise.
+// True inside the Android app (Capacitor), false on wingtips.nl.
+const IS_NATIVE = Capacitor.isNativePlatform();
+// Where e-mail links (password reset) should land: inside the app the page origin is the app's
+// own https://localhost, which a link from an e-mail can't open -- send those to the website.
+const WEB_ORIGIN = IS_NATIVE ? "https://wingtips.nl" : window.location.origin;
+
+// Android back button (app only). The app switches screens without browser history, so by
+// default "back" would close it. Open overlays register a close handler here (topmost wins);
+// otherwise the current screen's fallback steps back; only on Home does the app go to the
+// background.
+const backHandlers: (() => void)[] = [];
+let backFallback: (() => boolean) | null = null;
+function useBackClose(active: boolean, close: () => void) {
+  const ref = useRef(close);
+  ref.current = close;
+  useEffect(() => {
+    if (!active || !IS_NATIVE) return;
+    const h = () => ref.current();
+    backHandlers.push(h);
+    return () => { const i = backHandlers.lastIndexOf(h); if (i >= 0) backHandlers.splice(i, 1); };
+  }, [active]);
+}
+if (IS_NATIVE) {
+  CapApp.addListener("backButton", () => {
+    const top = backHandlers[backHandlers.length - 1];
+    if (top) { top(); return; }
+    if (backFallback && backFallback()) return;
+    CapApp.minimizeApp();
+  });
+}
+
 const AUTH_HASH_TYPE = (() => { const m = window.location.hash.match(/type=([^&]+)/); return m ? m[1] : null; })();
 
 const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.25.9";
+const APP_VERSION = "1.26.0";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -550,6 +583,7 @@ function resizeImage(file: File, max = 1400, quality = 0.8): Promise<string> {
 }
 function TipPhotos({ photos }: { photos?: string[] }) {
   const [open, setOpen] = useState<number | null>(null);
+  useBackClose(open !== null, () => setOpen(null));
   if (!photos || photos.length === 0) return null;
   const shown = photos.slice(0, 4);
   return (
@@ -680,10 +714,10 @@ function IntroSheet({ onClose }: { onClose: () => void }) {
             <span className="intro-point-icon"><Icon name="compass" size={20} /></span>
             <span><strong>Find what's near the crew hotel.</strong> Pick a destination, browse by category, and check the map, the weather and what's open right now.</span>
           </div>
-          <div className="intro-point">
+          {!IS_NATIVE && <div className="intro-point">
             <span className="intro-point-icon"><Icon name="heart" size={20} /></span>
             <span><strong>Free, with an optional donation.</strong> Running WingTips costs money. A small donation helps cover that, and half of every donation goes to Wings of Support.</span>
-          </div>
+          </div>}
         </div>
         <button type="button" className="donation-btn-primary" onClick={close}>Let's go</button>
       </div>
@@ -694,7 +728,9 @@ function IntroSheet({ onClose }: { onClose: () => void }) {
 function DonationReminderCard() {
   const [due, setDue] = useState(donationReminderDue);
   const [amount, setAmount] = useState<number | null>(1);
-  if (!due || !BUNQME_NAME) return null;
+  // App stores require their own payment systems for money paid to the app's maker, so
+  // donations are only offered on the website.
+  if (!due || !BUNQME_NAME || IS_NATIVE) return null;
   return (
     <div className="section-block">
       <div className="donation-reminder">
@@ -2024,6 +2060,7 @@ function DestScreen({ code, onBack, onAddTip, activeCategory, setActiveCategory,
   const [commentForms, setCommentForms] = useState({});
   const tipRefs = useRef<Record<string | number, HTMLDivElement | null>>({});
   const [showMap, setShowMap] = useState(false);
+  useBackClose(showMap, () => setShowMap(false));
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const [hotelCoords, setHotelCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -2704,6 +2741,7 @@ function ElevationProfile({ points }: { points: RoutePoint[] }) {
 
 function RouteViewer({ route, title, type, onClose }: { route: any; title: string; type?: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  useBackClose(true, onClose);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -2792,6 +2830,7 @@ function PinPickerOverlay({ initial, fallbackCity, fallbackCountry, onPick, onCl
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const [ready, setReady] = useState(false);
+  useBackClose(true, onClose);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -2846,6 +2885,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
   const destsByContinentCountry = groupDestsByContinentCountry(allDests);
   const [destCode, setDestCode] = useState(e0?.destCode || selectedDest || "");
   const [showDestPicker, setShowDestPicker] = useState(false);
+  useBackClose(showDestPicker, () => setShowDestPicker(false));
   const [openContinent, setOpenContinent] = useState<string | null>(null);
   const [destQuery, setDestQuery] = useState("");
   const destSearchQ = destQuery.trim().toLowerCase();
@@ -3088,6 +3128,7 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     if (parsedTags.length > 0) newTip.tags = parsedTags;
     if (e0) { saveEdit(newTip); return; }
     setPendingTip(newTip);
+    if (IS_NATIVE) { finalize("skip", newTip); return; }
     setShowDonation(true);
   }
 
@@ -3100,13 +3141,13 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
     if (result !== true) setEditError(result);
   }
 
-  async function finalize(choice: "donate" | "later" | "skip") {
+  async function finalize(choice: "donate" | "later" | "skip", tip: any = pendingTip) {
     if (submitting) return;
     // Opened inside the tap itself so the browser doesn't treat it as a blocked pop-up.
     if (choice === "donate" && donationAmount) { openDonation(donationAmount); setDonationReminder(null); }
     if (choice === "later") setDonationReminder(24);
     setSubmitting(true);
-    const ok = await onSubmit(destCode, pendingTip);
+    const ok = await onSubmit(destCode, tip);
     setSubmitting(false);
     if (!ok) { setSubmitError(true); return; }
     setShowDonation(false);
@@ -3702,11 +3743,12 @@ function AddRecommendationScreen({ onBack, selectedDest, onSubmit, onUpdate, pro
           </div>
         </div>
 
+        {IS_NATIVE && !e0 && submitError && <p className="donation-error">Couldn't post your recommendation. Check your connection and try again.</p>}
         {e0 && editError === "network" && <p className="donation-error">Couldn't save your changes. Check your connection and try again.</p>}
         {e0 && editError === "denied" && <p className="donation-error">The database didn't allow this change. You can only edit your own tips; if this is your tip, editing still needs to be switched on in the database.</p>}
         <button className="submit-btn" onClick={handleSubmit}
           disabled={!place.trim() || !destCode || !name.trim() || (isRoadTrip && tripModesSel.length === 0)}>
-          {e0 ? (submitting ? "Saving…" : "Save changes") : "Post Recommendation"}
+          {e0 ? (submitting ? "Saving…" : "Save changes") : (submitting ? "Posting…" : "Post Recommendation")}
         </button>
       </div>
     </div>
@@ -4746,7 +4788,7 @@ function AuthScreen({ initialTab = "signin", onBack }: { initialTab?: "signin" |
     setError("");
     if (!email) { setError("Enter your e-mail above first."); return; }
     setLoading(true);
-    const { error: err } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: WEB_ORIGIN });
     setLoading(false);
     if (err) setError(err.message); else setForgotSent(true);
   }
@@ -4871,6 +4913,9 @@ export default function WingTipsApp() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!authUser) backFallback = () => { if (authView === "landing") return false; setAuthView("landing"); return true; };
+  });
   if (authUser === "loading") return <div className="app-shell"><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--accent)"}}><Icon name="loader" size={28} className="spin" /></div></div>;
   if (showResetPassword && authUser) return <ResetPasswordScreen onDone={() => setShowResetPassword(false)} />;
   if (!authUser) {
@@ -4984,6 +5029,20 @@ function AppContent() {
   }, []);
 
   function handleAddTip(code, category) { setSelectedDest(code); setAddTipContext({ code, category }); setScreen("addrecommendation"); }
+
+  // Android back: close a menu/intro, then step back a screen (to the destination for screens
+  // opened from it, otherwise Home). Returning false on Home lets the app go to the background.
+  useEffect(() => {
+    backFallback = () => {
+      if (showCatMenu) { setShowCatMenu(false); return true; }
+      if (showDestMenu) { setShowDestMenu(false); return true; }
+      if (showIntro) { setShowIntro(false); return true; }
+      if (screen === "home") return false;
+      const fromDest = screen === "crewprofile" || screen === "edittip" || (screen === "addrecommendation" && addTipContext.code);
+      setScreen(fromDest && selectedDest ? "dest" : "home");
+      return true;
+    };
+  });
 
   // The Categories/Explore sheet and the map overlay both need to stop short of the top nav
   // instead of covering it -- a guessed pixel height (first try: 56px) came up a few pixels

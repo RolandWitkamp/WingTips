@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shows only in the strips Capacitor keeps free for the system bars: navy behind the status
+     bar (matching the app's top bar), the app's light background behind the gesture bar.
+     The top band is taller than any status bar; the WebView covers the rest of it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><color android:color="#EEF4FA" /></item>
+    <item android:gravity="top" android:height="120dp"><color android:color="#003082" /></item>
+</layer-list>
