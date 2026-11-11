@@ -381,3 +381,32 @@ drop policy if exists "feedback_update_owner" on feedback;
 create policy "feedback_update_owner" on feedback for update using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');
 drop policy if exists "feedback_delete_owner" on feedback;
 create policy "feedback_delete_owner" on feedback for delete using (lower(auth.jwt()->>'email') = 'roland.witkamp@klm.com');
+
+-- Tips and comments carry a copy of the author's name/role (author_name/author_role, name/role).
+-- Keep those copies in step with the profile: when someone changes their name or role (e.g.
+-- First Officer -> Second Officer), every tip and comment they wrote follows. Security definer
+-- because it only ever touches rows whose author is the profile being updated.
+create or replace function sync_author_profile() returns trigger as $$
+begin
+  if new.name is distinct from old.name or new.role is distinct from old.role then
+    update public.recommendations
+      set author_name = coalesce(nullif(new.name, ''), author_name), author_role = new.role
+      where author_id = new.id;
+    update public.recommendation_comments
+      set name = coalesce(nullif(new.name, ''), name), role = new.role
+      where author_id = new.id;
+  end if;
+  return new;
+end; $$ language plpgsql security definer set search_path = public;
+
+drop trigger if exists on_profile_name_role_changed on profiles;
+create trigger on_profile_name_role_changed after update of name, role on profiles
+  for each row execute procedure sync_author_profile();
+
+-- One-time catch-up for tips/comments written before the trigger existed.
+update recommendations r set author_name = p.name, author_role = p.role
+  from profiles p where p.id = r.author_id and p.name <> ''
+  and (r.author_name is distinct from p.name or r.author_role is distinct from p.role);
+update recommendation_comments c set name = p.name, role = p.role
+  from profiles p where p.id = c.author_id and p.name <> ''
+  and (c.name is distinct from p.name or c.role is distinct from p.role);

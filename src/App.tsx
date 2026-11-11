@@ -47,7 +47,7 @@ const GOOGLE_MAPS_KEY = "AIzaSyAEa1VgflcuixX4DfcuyH9bwerXgJiQCBE";
 const WEATHER_API_KEY = "105f28d6029a12181bc2527365a7e1d2";
 // Bump this on every deploy — shown in the Profile screen so it's easy to confirm the latest
 // build actually went live, same purpose as Pillow Report's "Version X.X.X" footer.
-const APP_VERSION = "1.26.1";
+const APP_VERSION = "1.26.2";
 
 const weatherCache: Record<string, { temp: string; desc: string; ts: number }> = {};
 type ForecastDay = { date: string; min: number; max: number; main: string; desc: string };
@@ -5257,7 +5257,7 @@ function AppContent() {
         {screen === "categoryfeed"  && <CategoryFeedScreen category={activeCategory} addedTips={addedTips} onBack={() => setScreen("home")} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} />}
         {screen === "notifications" && <NotificationsScreen onBack={() => setScreen("home")} notes={notifications} onMarkAllRead={markAllRead} adminSignups={adminSignups} tripNotifs={tripNotifs} onTipClick={(code: string, tipId: any, category: string) => { setSelectedDest(code); setActiveCategory(category); setFocusTipId(tipId); setScreen("dest"); }} onNotificationClick={(n: any) => { setSelectedDest(n.destCode); if (n.category) setActiveCategory(n.category); if (n.tipId != null) setFocusTipId(n.tipId); setScreen("dest"); }} />}
         {screen === "favorites"     && <FavoritesScreen onBack={() => setScreen("home")} favorites={favorites} onToggleFavorite={toggleFavorite} onDestClick={(code: string) => { setSelectedDest(code); setActiveCategory("all"); setScreen("dest"); }} addedTips={addedTips} tripLists={tripLists} />}
-        {screen === "profile"       && <ProfileScreen key={profileTab} initialTab={profileTab} onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} profile={profile} updateProfile={updateProfile} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
+        {screen === "profile"       && <ProfileScreen key={profileTab} initialTab={profileTab} onBack={() => setScreen("home")} connections={connections} addedTips={addedTips} onDeleteTip={deleteRecommendation} onEditTip={startEditTip} profile={profile} updateProfile={async (u: any) => { const r = await updateProfile(u); if (r.ok && (u.name !== undefined || u.role !== undefined)) reloadRecs(); return r; }} onCrewClick={(crew: any) => { setSelectedCrew(crew); setScreen("crewprofile"); }} />}
         {screen === "crewprofile"   && selectedCrew && <CrewProfileScreen crew={selectedCrew} onBack={() => setScreen("dest")} connections={connections} addedTips={addedTips} />}
 
         {/* DESTINATIONS SLIDE-UP MENU */}
